@@ -1,6 +1,6 @@
 # matrix-filter-game-url
 
-This will handle the redirects when the user close the game
+This plugin will handle the redirect urls when closing external games
 
 ## Install
 
@@ -22,7 +22,7 @@ npx cap sync
 
 </docgen-api>
 
-# Use the plugin
+# How to use the plugin
 ## Add this code in MainActivity in onCreate function
 
 ```java
