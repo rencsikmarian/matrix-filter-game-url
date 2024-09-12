@@ -1,1 +1,1 @@
-export interface NAIFilterGameUrlPlugin {}
+export interface NAIFilterGameUrlPlugin {};
