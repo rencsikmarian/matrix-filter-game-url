@@ -98,6 +98,17 @@ public class NAIFilterGameUrlPlugin extends BridgeWebViewClient {
         isBlocked = true;
         break;
       }
+
+      String openUrlParam = "OpenURL?url=";
+      if (urlString.contains(openUrlParam)) {
+        String paramValue = urlString.substring(urlString.indexOf(openUrlParam) + openUrlParam.length());
+        if (paramValue.contains(blockedDomain)) {
+          Log.d("NAIFilterGameUrlPlugin", "Matched blocked domain in OpenURL parameter: " + paramValue);
+          this.redirectAppUrl = this.appUrl;
+          isBlocked = true;
+          break;
+        }
+      }
     }
 
     // Your custom URL handling logic here
