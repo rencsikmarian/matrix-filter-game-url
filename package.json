@@ -9,6 +9,7 @@
   "files": [
     "android/src/main/",
     "android/build.gradle",
+    "ios/Plugin/",
     "dist/"
   ],
   "author": "Rencsik Marian",
@@ -41,7 +42,9 @@
   },
   "devDependencies": {
     "@capacitor/android": "^6.0.0",
+    "@capacitor/ios": "^6.0.0",
     "@capacitor/core": "^6.0.0",
+    "@capacitor/cli": "^6.0.0",
     "@capacitor/docgen": "^0.2.2",
     "@ionic/eslint-config": "^0.4.0",
     "@ionic/prettier-config": "^1.0.1",
@@ -65,6 +68,9 @@
   "capacitor": {
     "android": {
       "src": "android"
+    },
+    "ios": {
+      "src": "ios"
     }
   }
 }
