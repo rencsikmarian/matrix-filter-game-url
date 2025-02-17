@@ -9,7 +9,10 @@
   "files": [
     "android/src/main/",
     "android/build.gradle",
-    "ios/Plugin/",
+    "ios/Sources",
+    "ios/Tests",
+    "Package.swift",
+    "MatrixFilterGameUrl.podspec",
     "dist/"
   ],
   "author": "Rencsik Marian",

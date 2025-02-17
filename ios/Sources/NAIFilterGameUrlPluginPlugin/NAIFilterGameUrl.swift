@@ -1,66 +1,49 @@
 import Foundation
-import Capacitor
 import WebKit
 
-/**
- * Please read the Capacitor iOS Plugin Development Guide
- * here: https://capacitorjs.com/docs/plugins/ios
- */
-@objc(NAIFilterGameUrlPlugin)
-public class NAIFilterGameUrlPlugin: CAPPlugin, CAPBridgedPlugin {
-    public let identifier = "NAIFilterGameUrlPlugin"
-    public let jsName = "NAIFilterGameUrl"
-    public let pluginMethods: [CAPPluginMethod] = [
-        CAPPluginMethod(name: "echo", returnType: CAPPluginReturnPromise)
-    ]
+@objc public class NAIFilterGameUrl: NSObject {
+    @objc public func echo(_ value: String) -> String {
+        print(value)
+        return value
+    }
 
     private let defaultBlockedDomains = [
         "admiralbet.es",
-        "admiralbet.de",
+        "admiralbet.de", 
         "stargames.de",
         "starvegas.ch",
         "admiral.ch",
         "admiralcasino.co.uk",
-        "loteriesport.lu",
+        "loteriesport.lu", 
         "admiral.ro",
         "fenikss.lv",
         "feniksscasino.lv"
     ]
     
-    private var blockedDomains: [String] = []
-    private var redirectAppUrl: String = ""
-    private var appUrl: String = "capacitor://localhost:8100"
+    private var blockedDomains: [String]
+    private var redirectAppUrl: String
+    private let appUrl: String
 
-    private lazy var implementation: NAIFilterGameUrl = {
-        return NAIFilterGameUrl(plugin: self)
-    }()
-
-    @objc func echo(_ call: CAPPluginCall) {
-        let value = call.getString("value") ?? ""
-        call.resolve([
-            "value": implementation.echo(value)
-        ])
-    }
+    private weak var plugin: NAIFilterGameUrlPlugin?
     
-    @objc override public func load() {
-        print("NAIFilterGameUrlPlugin loaded successfully!")
-    }
-    
-    @objc public override func shouldOverrideLoad(_ navigationAction: WKNavigationAction) -> NSNumber? {
-        print("✅ shouldOverrideLoad called with URL: \(navigationAction.request.url?.absoluteString ?? "Unknown")")
+    init(plugin: NAIFilterGameUrlPlugin) {
         self.blockedDomains = defaultBlockedDomains
         // Default values similar to Android implementation
         let scheme = "capacitor"
         let hostname = "localhost:8100"
         self.redirectAppUrl = "\(scheme)://\(hostname)"
         self.appUrl = self.redirectAppUrl
-        
+        self.plugin = plugin
+        super.init()
+    }
+    
+    public func shouldOverrideLoad(_ navigationAction: WKNavigationAction) -> NSNumber? {
         guard let url = navigationAction.request.url else {
-            return nil // let capacitor policy decide
+            return nil
         }
         let urlString = url.absoluteString
         guard let host = url.host else {
-            return nil // let capacitor policy decide
+            return nil
         }
         
         var isBlocked = false
@@ -98,10 +81,13 @@ public class NAIFilterGameUrlPlugin: CAPPlugin, CAPBridgedPlugin {
         
         if isBlocked {
             print("NAIFilterGameUrlPlugin: Redirect from: \(urlString) to: \(redirectAppUrl)")
-            self.webView?.load(URLRequest(url: URL(string:redirectAppUrl)!))
+            if let redirectURL = URL(string: redirectAppUrl),
+               let webView = navigationAction.sourceFrame.webView {
+                webView.load(URLRequest(url: redirectURL))
+            }
             return NSNumber(value: true)
         }
         
-        return nil // let capacitor policy decide
+        return nil
     }
 }

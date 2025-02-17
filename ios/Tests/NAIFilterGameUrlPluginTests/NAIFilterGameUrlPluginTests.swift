@@ -1,12 +1,12 @@
 import XCTest
-@testable import NAIFilterGameUrlPluginPlugin
+@testable import NAIFilterGameUrlPlugin
 
-class NAIFilterGameUrlPluginTests: XCTestCase {
+class NAIFilterGameUrlTests: XCTestCase {
     func testEcho() {
         // This is an example of a functional test case for a plugin.
         // Use XCTAssert and related functions to verify your tests produce the correct results.
 
-        let implementation = NAIFilterGameUrlPlugin()
+        let implementation = NAIFilterGameUrl()
         let value = "Hello, World!"
         let result = implementation.echo(value)
 

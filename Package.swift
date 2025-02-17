@@ -7,22 +7,22 @@ let package = Package(
     products: [
         .library(
             name: "MatrixFilterGameUrl",
-            targets: ["NAIFilterGameUrlPluginPlugin"])
+            targets: ["NAIFilterGameUrlPlugin"])
     ],
     dependencies: [
         .package(url: "https://github.com/ionic-team/capacitor-swift-pm.git", from: "7.0.0")
     ],
     targets: [
         .target(
-            name: "NAIFilterGameUrlPluginPlugin",
+            name: "NAIFilterGameUrlPlugin",
             dependencies: [
                 .product(name: "Capacitor", package: "capacitor-swift-pm"),
                 .product(name: "Cordova", package: "capacitor-swift-pm")
             ],
-            path: "ios/Sources/NAIFilterGameUrlPluginPlugin"),
+            path: "ios/Sources/NAIFilterGameUrlPlugin"),
         .testTarget(
-            name: "NAIFilterGameUrlPluginPluginTests",
-            dependencies: ["NAIFilterGameUrlPluginPlugin"],
-            path: "ios/Tests/NAIFilterGameUrlPluginPluginTests")
+            name: "NAIFilterGameUrlPluginTests",
+            dependencies: ["NAIFilterGameUrlPlugin"],
+            path: "ios/Tests/NAIFilterGameUrlPluginTests")
     ]
 )
