@@ -10,9 +10,7 @@ import WebKit
 public class NAIFilterGameUrlPlugin: CAPPlugin, CAPBridgedPlugin {
     public let identifier = "NAIFilterGameUrlPlugin"
     public let jsName = "NAIFilterGameUrl"
-    public let pluginMethods: [CAPPluginMethod] = [
-        CAPPluginMethod(name: "echo", returnType: CAPPluginReturnPromise)
-    ]
+    public let pluginMethods: [CAPPluginMethod] = []
 
     private let defaultBlockedDomains = [
         "admiralbet.es",
@@ -29,31 +27,24 @@ public class NAIFilterGameUrlPlugin: CAPPlugin, CAPBridgedPlugin {
     
     private var blockedDomains: [String] = []
     private var redirectAppUrl: String = ""
-    private var appUrl: String = "capacitor://localhost:8100"
+    private var appUrl: String = ""
 
-    private lazy var implementation: NAIFilterGameUrl = {
-        return NAIFilterGameUrl(plugin: self)
-    }()
-
-    @objc func echo(_ call: CAPPluginCall) {
-        let value = call.getString("value") ?? ""
-        call.resolve([
-            "value": implementation.echo(value)
-        ])
-    }
-    
     @objc override public func load() {
         print("NAIFilterGameUrlPlugin loaded successfully!")
+        
+        // Get the scheme and hostname from Capacitor config
+        let scheme = bridge?.config.getString("server.scheme") ?? InstanceDescriptorDefaults.scheme
+        let hostname = bridge?.config.getString("server.hostname") ?? InstanceDescriptorDefaults.hostname
+
+        self.appUrl = "\(scheme)://\(hostname)"
+        self.redirectAppUrl = self.appUrl
+        self.blockedDomains = defaultBlockedDomains
+
+         print("🔹 App URL set to: \(self.appUrl)")
     }
     
     @objc public override func shouldOverrideLoad(_ navigationAction: WKNavigationAction) -> NSNumber? {
         print("✅ shouldOverrideLoad called with URL: \(navigationAction.request.url?.absoluteString ?? "Unknown")")
-        self.blockedDomains = defaultBlockedDomains
-        // Default values similar to Android implementation
-        let scheme = "capacitor"
-        let hostname = "localhost:8100"
-        self.redirectAppUrl = "\(scheme)://\(hostname)"
-        self.appUrl = self.redirectAppUrl
         
         guard let url = navigationAction.request.url else {
             return nil // let capacitor policy decide
