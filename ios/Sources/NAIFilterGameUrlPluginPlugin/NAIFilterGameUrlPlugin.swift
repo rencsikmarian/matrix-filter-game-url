@@ -85,6 +85,12 @@ public class NAIFilterGameUrlPlugin: CAPPlugin, CAPBridgedPlugin {
                 isBlocked = true
                 break
             }
+            if host.contains("lobbyiframelaunch") {
+                print("NAIFilterGameUrlPlugin: Matched blocked domain 'lobbyiframelaunch'")
+                redirectAppUrl = appUrl
+                isBlocked = true
+                break
+            }
         }
         
         if isBlocked {

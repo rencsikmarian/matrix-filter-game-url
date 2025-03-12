@@ -109,6 +109,12 @@ public class NAIFilterGameUrlPlugin extends BridgeWebViewClient {
           break;
         }
       }
+      if (host.contains("lobbyiframelaunch")) {
+        Log.d("NAIFilterGameUrlPlugin", "Matched blocked domain 'lobbyiframelaunch' ");
+        this.redirectAppUrl = this.appUrl;
+        isBlocked = true;
+        break;
+      }
     }
 
     // Your custom URL handling logic here
