@@ -27,7 +27,8 @@ public class NAIFilterGameUrlPlugin extends BridgeWebViewClient {
     "loteriesport.lu",
     "admiral.ro",
     "fenikss.lv",
-    "feniksscasino.lv"
+    "feniksscasino.lv",
+    "starvegas.es"
     // Add more domains as needed
   );
 

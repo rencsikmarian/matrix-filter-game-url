@@ -22,7 +22,8 @@ public class NAIFilterGameUrlPlugin: CAPPlugin, CAPBridgedPlugin {
         "loteriesport.lu",
         "admiral.ro",
         "fenikss.lv",
-        "feniksscasino.lv"
+        "feniksscasino.lv",
+        "starvegas.es"
     ]
     
     private var blockedDomains: [String] = []
