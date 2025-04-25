@@ -88,11 +88,13 @@ public class NAIFilterGameUrlPlugin extends BridgeWebViewClient {
           schema = "";
         }
         if(schema.equals("https")){
-          this.redirectAppUrl = urlString.replace("https://staging." + blockedDomain, this.appUrl);
+          this.redirectAppUrl = urlString.replace("https://" + blockedDomain, this.appUrl);
+          this.redirectAppUrl = this.redirectAppUrl.replace("https://staging." + blockedDomain, this.appUrl);
           this.redirectAppUrl = this.redirectAppUrl.replace("https://beta." + blockedDomain, this.appUrl);
           this.redirectAppUrl = this.redirectAppUrl.replace("https://www." + blockedDomain, this.appUrl);
         } else if(schema.equals("http")){
-          this.redirectAppUrl = urlString.replace("http://staging." + blockedDomain, this.appUrl);
+          this.redirectAppUrl = urlString.replace("http://" + blockedDomain, this.appUrl);
+          this.redirectAppUrl = this.redirectAppUrl.replace("http://staging." + blockedDomain, this.appUrl);
           this.redirectAppUrl = this.redirectAppUrl.replace("http://beta." + blockedDomain, this.appUrl);
           this.redirectAppUrl = this.redirectAppUrl.replace("http://www." + blockedDomain, this.appUrl);
         }

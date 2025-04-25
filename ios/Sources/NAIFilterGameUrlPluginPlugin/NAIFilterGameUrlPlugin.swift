@@ -64,11 +64,13 @@ public class NAIFilterGameUrlPlugin: CAPPlugin, CAPBridgedPlugin {
                 
                 if scheme == "https" {
                     redirectAppUrl = urlString
+                        .replacingOccurrences(of: "https://\(blockedDomain)", with: appUrl)
                         .replacingOccurrences(of: "https://staging.\(blockedDomain)", with: appUrl)
                         .replacingOccurrences(of: "https://beta.\(blockedDomain)", with: appUrl)
                         .replacingOccurrences(of: "https://www.\(blockedDomain)", with: appUrl)
                 } else if scheme == "http" {
                     redirectAppUrl = urlString
+                        .replacingOccurrences(of: "http://\(blockedDomain)", with: appUrl)
                         .replacingOccurrences(of: "http://staging.\(blockedDomain)", with: appUrl)
                         .replacingOccurrences(of: "http://beta.\(blockedDomain)", with: appUrl)
                         .replacingOccurrences(of: "http://www.\(blockedDomain)", with: appUrl)
