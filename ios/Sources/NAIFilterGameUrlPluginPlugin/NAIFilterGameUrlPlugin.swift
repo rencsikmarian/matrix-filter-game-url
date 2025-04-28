@@ -50,7 +50,7 @@ public class NAIFilterGameUrlPlugin: CAPPlugin, CAPBridgedPlugin {
         guard let url = navigationAction.request.url else {
             return nil // let capacitor policy decide
         }
-        let urlString = url.absoluteString
+        let urlString = url.absoluteString.lowercased()
         guard let host = url.host else {
             return nil // let capacitor policy decide
         }
@@ -79,7 +79,7 @@ public class NAIFilterGameUrlPlugin: CAPPlugin, CAPBridgedPlugin {
                 break
             }
             
-            let openUrlParam = "OpenURL?url="
+            let openUrlParam = "openurl?url="
             if urlString.contains(openUrlParam),
                let paramValue = urlString.components(separatedBy: openUrlParam).last,
                paramValue.contains(blockedDomain) {
@@ -90,6 +90,12 @@ public class NAIFilterGameUrlPlugin: CAPPlugin, CAPBridgedPlugin {
             }
             if host.contains("lobbyiframelaunch") {
                 print("NAIFilterGameUrlPlugin: Matched blocked domain 'lobbyiframelaunch'")
+                redirectAppUrl = appUrl
+                isBlocked = true
+                break
+            }
+            if urlString.hasSuffix("/lobbyiframelaunch") {
+                print("NAIFilterGameUrlPlugin: Matched blocked domain '/lobbyiframelaunch'")
                 redirectAppUrl = appUrl
                 isBlocked = true
                 break

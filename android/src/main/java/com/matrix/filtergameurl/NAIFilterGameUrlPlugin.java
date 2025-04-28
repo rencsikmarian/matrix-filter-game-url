@@ -71,7 +71,7 @@ public class NAIFilterGameUrlPlugin extends BridgeWebViewClient {
   public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
     Uri url = request.getUrl();
     String host = url.getHost();
-    String urlString = url.toString();
+    String urlString = url.toString().toLowerCase();
     Log.d("NAIFilterGameUrlPlugin", "Attempting to load URL: " + urlString);
 
     if (host == null) {
@@ -102,7 +102,7 @@ public class NAIFilterGameUrlPlugin extends BridgeWebViewClient {
         break;
       }
 
-      String openUrlParam = "OpenURL?url=";
+      String openUrlParam = "openurl?url=";
       if (urlString.contains(openUrlParam)) {
         String paramValue = urlString.substring(urlString.indexOf(openUrlParam) + openUrlParam.length());
         if (paramValue.contains(blockedDomain)) {
@@ -113,6 +113,12 @@ public class NAIFilterGameUrlPlugin extends BridgeWebViewClient {
         }
       }
       if (host.contains("lobbyiframelaunch")) {
+        Log.d("NAIFilterGameUrlPlugin", "Matched blocked domain 'lobbyiframelaunch' ");
+        this.redirectAppUrl = this.appUrl;
+        isBlocked = true;
+        break;
+      }
+      if (urlString.endsWith("/lobbyiframelaunch")) {
         Log.d("NAIFilterGameUrlPlugin", "Matched blocked domain 'lobbyiframelaunch' ");
         this.redirectAppUrl = this.appUrl;
         isBlocked = true;
