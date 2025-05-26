@@ -62,6 +62,20 @@ public class NAIFilterGameUrlPlugin: CAPPlugin, CAPBridgedPlugin {
                 print("NAIFilterGameUrlPlugin: Matched host: \(host)")
                 let scheme = url.scheme ?? ""
                 
+                let allowedPrefixes = ["", "www.", "staging.", "beta."]
+                var shouldRedirect = false
+                
+                for prefix in allowedPrefixes {
+                    if host == "\(prefix)\(blockedDomain)" {
+                        shouldRedirect = true
+                        break
+                    }
+                }
+                
+                if !shouldRedirect {
+                    break
+                }
+                
                 if scheme == "https" {
                     redirectAppUrl = urlString
                         .replacingOccurrences(of: "https://\(blockedDomain)", with: appUrl)

@@ -87,6 +87,21 @@ public class NAIFilterGameUrlPlugin extends BridgeWebViewClient {
         if (schema == null){
           schema = "";
         }
+
+        String[] allowedPrefixes = {"", "www.", "staging.", "beta."};
+        boolean shouldRedirect = false;
+
+        for (String prefix : allowedPrefixes) {
+          if (host.equals(prefix + blockedDomain)) {
+            shouldRedirect = true;
+            break;
+          }
+        }
+
+        if (!shouldRedirect) {
+          break;
+        }
+
         if(schema.equals("https")){
           this.redirectAppUrl = urlString.replace("https://" + blockedDomain, this.appUrl);
           this.redirectAppUrl = this.redirectAppUrl.replace("https://staging." + blockedDomain, this.appUrl);
