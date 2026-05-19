@@ -1,6 +1,6 @@
 {
   "name": "matrix-filter-game-url",
-  "version": "0.0.6",
+  "version": "8.0.6",
   "description": "This will handle the redirects when the user close the game",
   "main": "dist/plugin.cjs.js",
   "module": "dist/esm/index.js",
