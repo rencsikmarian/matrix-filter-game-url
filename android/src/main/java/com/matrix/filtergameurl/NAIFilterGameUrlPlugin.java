@@ -78,6 +78,10 @@ public class NAIFilterGameUrlPlugin extends BridgeWebViewClient {
       host = "";
     }
 
+    if (urlString.contains("/ichatclient/") || urlString.contains("novomind") || urlString.contains("/chatRest")) {
+        return false;
+    }
+
     boolean isBlocked = false;
 
     for (String blockedDomain : blockedDomains) {

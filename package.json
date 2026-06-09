@@ -1,6 +1,6 @@
 {
   "name": "matrix-filter-game-url",
-  "version": "8.0.6",
+  "version": "8.0.7",
   "description": "This will handle the redirects when the user close the game",
   "main": "dist/plugin.cjs.js",
   "module": "dist/esm/index.js",
@@ -32,6 +32,7 @@
   "scripts": {
     "verify": "npm run verify:android && npm run verify:web",
     "verify:android": "cd android && ./gradlew clean build test && cd ..",
+    "verify:ios": "xcodebuild -scheme NAIFilterGameUrl -destination generic/platform=iOS",
     "verify:web": "npm run build",
     "lint": "npm run eslint && npm run prettier -- --check",
     "fmt": "npm run eslint -- --fix && npm run prettier -- --write",

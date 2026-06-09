@@ -54,6 +54,10 @@ public class NAIFilterGameUrlPlugin: CAPPlugin, CAPBridgedPlugin {
         guard let host = url.host else {
             return nil // let capacitor policy decide
         }
+
+        if urlString.contains("/ichatclient/") || urlString.contains("novomind") || urlString.contains("/chatRest"){
+            return nil
+        }
         
         var isBlocked = false
         
