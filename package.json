@@ -32,7 +32,7 @@
   "scripts": {
     "verify": "npm run verify:android && npm run verify:web",
     "verify:android": "cd android && ./gradlew clean build test && cd ..",
-    "verify:ios": "xcodebuild -scheme NAIFilterGameUrl -destination generic/platform=iOS",
+    "verify:ios": "xcodebuild -scheme MatrixFilterGameUrl -destination generic/platform=iOS",
     "verify:web": "npm run build",
     "lint": "npm run eslint && npm run prettier -- --check",
     "fmt": "npm run eslint -- --fix && npm run prettier -- --write",
