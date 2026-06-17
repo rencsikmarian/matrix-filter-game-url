@@ -12,120 +12,81 @@ public class NAIFilterGameUrlPlugin: CAPPlugin, CAPBridgedPlugin {
     public let jsName = "NAIFilterGameUrl"
     public let pluginMethods: [CAPPluginMethod] = []
 
-    private let defaultBlockedDomains = [
-        "admiralbet.es",
-        "admiralbet.de",
-        "stargames.de",
-        "starvegas.ch",
-        "admiral.ch",
-        "admiralcasino.co.uk",
-        "loteriesport.lu",
-        "admiral.ro",
-        "fenikss.lv",
-        "feniksscasino.lv",
-        "starvegas.es"
-    ]
-    
+    private static let allowedPrefixes = ["", "www.", "staging.", "beta."]
+
     private var blockedDomains: [String] = []
-    private var redirectAppUrl: String = ""
+    private var passPaths: [String] = []
+    private var openUrlParams: [String] = []
+    private var blockedHostKeywords: [String] = []
+    private var blockedPathSuffixes: [String] = []
     private var appUrl: String = ""
 
     @objc override public func load() {
-        print("NAIFilterGameUrlPlugin loaded successfully!")
-        
-        // Get the scheme and hostname from Capacitor config
         let scheme = bridge?.config.getString("server.scheme") ?? InstanceDescriptorDefaults.scheme
         let hostname = bridge?.config.getString("server.hostname") ?? InstanceDescriptorDefaults.hostname
+        appUrl = "\(scheme)://\(hostname)"
 
-        self.appUrl = "\(scheme)://\(hostname)"
-        self.redirectAppUrl = self.appUrl
-        self.blockedDomains = defaultBlockedDomains
+        let config = getConfig()
+        blockedDomains = configList(config, "blockedDomains")
+        passPaths = configList(config, "passPaths")
+        openUrlParams = configList(config, "openUrlParams")
+        blockedHostKeywords = configList(config, "blockedHostKeywords")
+        blockedPathSuffixes = configList(config, "blockedPathSuffixes")
 
-         print("🔹 App URL set to: \(self.appUrl)")
+        print("NAIFilterGameUrlPlugin loaded. App URL: \(appUrl), blocked domains: \(blockedDomains)")
     }
-    
+
     @objc public override func shouldOverrideLoad(_ navigationAction: WKNavigationAction) -> NSNumber? {
-        print("✅ shouldOverrideLoad called with URL: \(navigationAction.request.url?.absoluteString ?? "Unknown")")
-        
-        guard let url = navigationAction.request.url else {
+        guard let url = navigationAction.request.url, let host = url.host?.lowercased() else {
             return nil // let capacitor policy decide
         }
         let urlString = url.absoluteString.lowercased()
-        guard let host = url.host else {
-            return nil // let capacitor policy decide
+
+        // 1. Blocked domain: redirect, unless a pass path exempts the URL
+        let isBlockedDomain = blockedDomains.contains { domain in
+            Self.allowedPrefixes.contains { prefix in host == prefix + domain }
+        }
+        if isBlockedDomain {
+            if passPaths.contains(where: { urlString.contains($0) }) {
+                print("NAIFilterGameUrlPlugin: Pass path allowed: \(urlString)")
+                return nil
+            }
+            let scheme = url.scheme?.lowercased() ?? ""
+            let redirectUrl = urlString.replacingOccurrences(of: "\(scheme)://\(host)", with: appUrl)
+            return redirect(from: urlString, to: redirectUrl)
         }
 
-        if urlString.contains("/ichatclient/") || urlString.contains("novomind") || urlString.contains("/chatRest"){
-            return nil
-        }
-        
-        var isBlocked = false
-        
-        for blockedDomain in blockedDomains {
-            if host.contains(blockedDomain) {
-                print("NAIFilterGameUrlPlugin: Matched host: \(host)")
-                let scheme = url.scheme ?? ""
-                
-                let allowedPrefixes = ["", "www.", "staging.", "beta."]
-                var shouldRedirect = false
-                
-                for prefix in allowedPrefixes {
-                    if host == "\(prefix)\(blockedDomain)" {
-                        shouldRedirect = true
-                        break
-                    }
-                }
-                
-                if !shouldRedirect {
-                    break
-                }
-                
-                if scheme == "https" {
-                    redirectAppUrl = urlString
-                        .replacingOccurrences(of: "https://\(blockedDomain)", with: appUrl)
-                        .replacingOccurrences(of: "https://staging.\(blockedDomain)", with: appUrl)
-                        .replacingOccurrences(of: "https://beta.\(blockedDomain)", with: appUrl)
-                        .replacingOccurrences(of: "https://www.\(blockedDomain)", with: appUrl)
-                } else if scheme == "http" {
-                    redirectAppUrl = urlString
-                        .replacingOccurrences(of: "http://\(blockedDomain)", with: appUrl)
-                        .replacingOccurrences(of: "http://staging.\(blockedDomain)", with: appUrl)
-                        .replacingOccurrences(of: "http://beta.\(blockedDomain)", with: appUrl)
-                        .replacingOccurrences(of: "http://www.\(blockedDomain)", with: appUrl)
-                }
-                isBlocked = true
-                break
-            }
-            
-            let openUrlParam = "openurl?url="
-            if urlString.contains(openUrlParam),
-               let paramValue = urlString.components(separatedBy: openUrlParam).last,
-               paramValue.contains(blockedDomain) {
-                print("NAIFilterGameUrlPlugin: Matched blocked domain in OpenURL parameter: \(paramValue)")
-                redirectAppUrl = appUrl
-                isBlocked = true
-                break
-            }
-            if host.contains("lobbyiframelaunch") {
-                print("NAIFilterGameUrlPlugin: Matched blocked domain 'lobbyiframelaunch'")
-                redirectAppUrl = appUrl
-                isBlocked = true
-                break
-            }
-            if urlString.hasSuffix("/lobbyiframelaunch") {
-                print("NAIFilterGameUrlPlugin: Matched blocked domain '/lobbyiframelaunch'")
-                redirectAppUrl = appUrl
-                isBlocked = true
-                break
+        // 2. Blocked domain inside an open-url parameter, on any host
+        for param in openUrlParams where urlString.contains(param) {
+            let paramValue = urlString.components(separatedBy: param).dropFirst().joined(separator: param)
+            if blockedDomains.contains(where: { paramValue.contains($0) }) {
+                return redirect(from: urlString, to: appUrl)
             }
         }
-        
-        if isBlocked {
-            print("NAIFilterGameUrlPlugin: Redirect from: \(urlString) to: \(redirectAppUrl)")
-            self.webView?.load(URLRequest(url: URL(string:redirectAppUrl)!))
-            return NSNumber(value: true)
+
+        // 3. Blocked host keywords, on any host
+        if blockedHostKeywords.contains(where: { host.contains($0) }) {
+            return redirect(from: urlString, to: appUrl)
         }
-        
+
+        // 4. Blocked path suffixes, on any URL
+        if blockedPathSuffixes.contains(where: { urlString.hasSuffix("/\($0)") }) {
+            return redirect(from: urlString, to: appUrl)
+        }
+
         return nil // let capacitor policy decide
+    }
+
+    private func configList(_ config: PluginConfig, _ key: String) -> [String] {
+        return (config.getArray(key) ?? []).compactMap { ($0 as? String)?.lowercased() }
+    }
+
+    private func redirect(from urlString: String, to redirectUrl: String) -> NSNumber? {
+        guard let url = URL(string: redirectUrl) else {
+            return nil // malformed target; let capacitor policy decide
+        }
+        print("NAIFilterGameUrlPlugin: Redirect from: \(urlString) to: \(redirectUrl)")
+        webView?.load(URLRequest(url: url))
+        return NSNumber(value: true)
     }
 }

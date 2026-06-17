@@ -9,6 +9,39 @@ npm install matrix-filter-game-url
 npx cap sync
 ```
 
+## Configuration
+
+All filtering rules live in your `capacitor.config.ts` (or
+`capacitor.config.json`). Every key is optional — an omitted key disables that
+check, and **without a `NAIFilterGameUrl` entry the plugin lets every URL
+through** (the previously hardcoded domain list was removed in this version).
+Values are matched case-insensitively.
+
+```typescript
+import type { CapacitorConfig } from '@capacitor/cli';
+
+const config: CapacitorConfig = {
+  plugins: {
+    NAIFilterGameUrl: {
+      // Pages on these domains (incl. www./staging./beta. variants)
+      // redirect back to the app URL.
+      blockedDomains: ['admiralbet.es', 'admiralbet.de', 'stargames.de'],
+      // URLs on a blocked domain containing one of these load normally.
+      passPaths: ['/ichatclient/', 'novomind', '/chatrest'],
+      // Checked on every URL: if the text after the marker contains a
+      // blocked domain, redirect to the app URL.
+      openUrlParams: ['openurl?url='],
+      // Checked on every URL: host contains the entry -> redirect.
+      blockedHostKeywords: ['lobbyiframelaunch'],
+      // Checked on every URL: URL ends with "/<entry>" -> redirect.
+      blockedPathSuffixes: ['lobbyiframelaunch'],
+    },
+  },
+};
+
+export default config;
+```
+
 ## API
 
 <docgen-index>
@@ -19,6 +52,8 @@ npx cap sync
 
 <docgen-api>
 <!--Update the source file JSDoc comments and rerun docgen to update the docs below-->
+
+
 
 </docgen-api>
 
@@ -37,6 +72,8 @@ public class MainActivity extends BridgeActivity {
   }
 }
 ```
+
+The optional second constructor argument (`new NAIFilterGameUrlPlugin(this.bridge, domains)`) overrides the `blockedDomains` config key; all other lists always come from the Capacitor config.
 
 ## TODO
 - [ ] Add same function for iOS
