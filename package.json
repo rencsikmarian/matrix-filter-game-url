@@ -30,7 +30,7 @@
     "native"
   ],
   "scripts": {
-    "verify": "npm run verify:android && npm run verify:web",
+    "verify": "npm run verify:android && npm run verify:ios && npm run verify:web",
     "verify:android": "cd android && ./gradlew clean build test && cd ..",
     "verify:ios": "xcodebuild -scheme MatrixFilterGameUrl -destination generic/platform=iOS",
     "verify:web": "npm run build",

@@ -17,24 +17,35 @@ check, and **without a `NAIFilterGameUrl` entry the plugin lets every URL
 through** (the previously hardcoded domain list was removed in this version).
 Values are matched case-insensitively.
 
+When a URL is blocked, the WebView is sent back to the **most recent page the
+user visited on the app's own host** (the last internal link), falling back to
+the app URL if none was seen. Use `historyLimit` and `excludedReturnPaths` to
+tune which pages are remembered.
+
 ```typescript
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   plugins: {
     NAIFilterGameUrl: {
-      // Pages on these domains (incl. www./staging./beta. variants)
-      // redirect back to the app URL.
+      // Pages on these domains (incl. www./staging./beta. variants) send the
+      // WebView back to the last visited app page.
       blockedDomains: ['admiralbet.es', 'admiralbet.de', 'stargames.de'],
       // URLs on a blocked domain containing one of these load normally.
       passPaths: ['/ichatclient/', 'novomind', '/chatrest'],
       // Checked on every URL: if the text after the marker contains a
-      // blocked domain, redirect to the app URL.
+      // blocked domain, return to the last visited app page.
       openUrlParams: ['openurl?url='],
-      // Checked on every URL: host contains the entry -> redirect.
+      // Checked on every URL: host contains the entry -> return to last app page.
       blockedHostKeywords: ['lobbyiframelaunch'],
-      // Checked on every URL: URL ends with "/<entry>" -> redirect.
+      // Checked on every URL: URL ends with "/<entry>" -> return to last app page.
       blockedPathSuffixes: ['lobbyiframelaunch'],
+      // How many recent app-host pages to remember; the newest is reloaded
+      // when a URL is blocked. 0 disables tracking. Defaults to 3.
+      historyLimit: 3,
+      // App-host pages whose URL contains one of these are never remembered as
+      // a return target (so a block won't send the user back to them).
+      excludedReturnPaths: ['/cash', '/free'],
     },
   },
 };

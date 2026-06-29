@@ -1,7 +1,9 @@
 package com.matrix.filtergameurl;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Deque;
 import java.util.List;
 import java.util.Locale;
 
@@ -27,6 +29,9 @@ public class NAIFilterGameUrlPlugin extends BridgeWebViewClient {
   private final List<String> openUrlParams;
   private final List<String> blockedHostKeywords;
   private final List<String> blockedPathSuffixes;
+  private final List<String> excludedReturnPaths;
+  private final int historyLimit;
+  private final Deque<String> internalUrlHistory = new ArrayDeque<>();
   private final String appUrl;
 
   public NAIFilterGameUrlPlugin(Bridge bridge) {
@@ -51,6 +56,8 @@ public class NAIFilterGameUrlPlugin extends BridgeWebViewClient {
     this.openUrlParams = configList(config, "openUrlParams");
     this.blockedHostKeywords = configList(config, "blockedHostKeywords");
     this.blockedPathSuffixes = configList(config, "blockedPathSuffixes");
+    this.excludedReturnPaths = configList(config, "excludedReturnPaths");
+    this.historyLimit = Math.max(0, config.getInt("historyLimit", 3));
 
     String scheme = bridge.getScheme();
     String hostname = bridge.getHost();
@@ -76,12 +83,10 @@ public class NAIFilterGameUrlPlugin extends BridgeWebViewClient {
     if (matchesBlockedDomain(host)) {
       if (containsAny(urlString, passPaths)) {
         Log.d(TAG, "Pass path allowed: " + urlString);
+        recordIfInternal(request, url.toString());
         return false;
       }
-      String scheme = url.getScheme();
-      scheme = scheme == null ? "" : scheme.toLowerCase(Locale.ROOT);
-      String redirectUrl = urlString.replace(scheme + "://" + host, appUrl);
-      return redirect(view, urlString, redirectUrl);
+      return redirect(view, urlString, lastInternalUrl());
     }
 
     // 2. Blocked domain inside an open-url parameter, on any host
@@ -90,7 +95,7 @@ public class NAIFilterGameUrlPlugin extends BridgeWebViewClient {
       if (index >= 0) {
         String paramValue = urlString.substring(index + param.length());
         if (containsAny(paramValue, blockedDomains)) {
-          return redirect(view, urlString, appUrl);
+          return redirect(view, urlString, lastInternalUrl());
         }
       }
     }
@@ -98,17 +103,18 @@ public class NAIFilterGameUrlPlugin extends BridgeWebViewClient {
     // 3. Blocked host keywords, on any host
     for (String keyword : blockedHostKeywords) {
       if (host.contains(keyword)) {
-        return redirect(view, urlString, appUrl);
+        return redirect(view, urlString, lastInternalUrl());
       }
     }
 
     // 4. Blocked path suffixes, on any URL
     for (String suffix : blockedPathSuffixes) {
       if (urlString.endsWith("/" + suffix)) {
-        return redirect(view, urlString, appUrl);
+        return redirect(view, urlString, lastInternalUrl());
       }
     }
 
+    recordIfInternal(request, url.toString());
     return super.shouldOverrideUrlLoading(view, request);
   }
 
@@ -148,6 +154,32 @@ public class NAIFilterGameUrlPlugin extends BridgeWebViewClient {
       }
     }
     return result;
+  }
+
+  private void recordIfInternal(WebResourceRequest request, String originalUrl) {
+    if (historyLimit <= 0 || !request.isForMainFrame()) {
+      return;
+    }
+    String lower = originalUrl.toLowerCase(Locale.ROOT);
+    if (!lower.startsWith(appUrl.toLowerCase(Locale.ROOT))) {
+      return;
+    }
+    if (containsAny(lower, excludedReturnPaths)) {
+      return;
+    }
+    if (originalUrl.equals(internalUrlHistory.peekFirst())) {
+      return; // dedup consecutive
+    }
+    internalUrlHistory.addFirst(originalUrl);
+    while (internalUrlHistory.size() > historyLimit) {
+      internalUrlHistory.removeLast();
+    }
+    Log.d(TAG, "Recorded internal URL. History: " + internalUrlHistory);
+  }
+
+  private String lastInternalUrl() {
+    String first = internalUrlHistory.peekFirst();
+    return first != null ? first : appUrl;
   }
 
   private boolean redirect(WebView view, String from, String to) {
