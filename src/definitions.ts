@@ -1,5 +1,7 @@
 /// <reference types="@capacitor/cli" />
 
+import type { PluginListenerHandle } from '@capacitor/core';
+
 declare module '@capacitor/cli' {
   export interface PluginsConfig {
     /**
@@ -77,5 +79,42 @@ declare module '@capacitor/cli' {
   }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-empty-interface
-export interface NAIFilterGameUrlPlugin {}
+/**
+ * Payload of the `appUrlIntercepted` event.
+ */
+export interface AppUrlIntercepted {
+  /**
+   * The blocked URL that was cancelled (lowercased).
+   */
+  url: string;
+
+  /**
+   * Where the user should go instead: the last visited app page, or the app
+   * URL if none was recorded. Absolute, e.g. "capacitor://localhost/de/slots".
+   */
+  appUrl: string;
+
+  /**
+   * Whether the blocked navigation targeted the main frame (false for
+   * iframes, e.g. an embedded game).
+   */
+  isMainFrame: boolean;
+}
+
+export interface NAIFilterGameUrlPlugin {
+  /**
+   * Fired when a navigation is blocked. While a listener is attached the
+   * navigation is cancelled without reloading the WebView, so the app stays
+   * alive and can route to `appUrl` itself. Without a listener the WebView
+   * reloads `appUrl` instead.
+   */
+  addListener(
+    eventName: 'appUrlIntercepted',
+    listenerFunc: (event: AppUrlIntercepted) => void,
+  ): Promise<PluginListenerHandle>;
+
+  /**
+   * Removes all listeners for this plugin.
+   */
+  removeAllListeners(): Promise<void>;
+}

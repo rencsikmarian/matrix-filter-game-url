@@ -15,6 +15,7 @@ import android.util.Log;
 import com.getcapacitor.Bridge;
 import com.getcapacitor.BridgeWebViewClient;
 import com.getcapacitor.PluginConfig;
+import com.getcapacitor.PluginHandle;
 
 public class NAIFilterGameUrlPlugin extends BridgeWebViewClient {
 
@@ -33,6 +34,7 @@ public class NAIFilterGameUrlPlugin extends BridgeWebViewClient {
   private final int historyLimit;
   private final Deque<String> internalUrlHistory = new ArrayDeque<>();
   private final String appUrl;
+  private final Bridge bridge;
 
   public NAIFilterGameUrlPlugin(Bridge bridge) {
     this(bridge, null);
@@ -44,6 +46,7 @@ public class NAIFilterGameUrlPlugin extends BridgeWebViewClient {
    */
   public NAIFilterGameUrlPlugin(Bridge bridge, List<String> domains) {
     super(bridge);
+    this.bridge = bridge;
 
     PluginConfig config = bridge.getConfig().getPluginConfiguration(CONFIG_KEY);
 
@@ -86,7 +89,7 @@ public class NAIFilterGameUrlPlugin extends BridgeWebViewClient {
         recordIfInternal(request, url.toString());
         return false;
       }
-      return redirect(view, urlString, lastInternalUrl());
+      return redirect(view, request, urlString, lastInternalUrl());
     }
 
     // 2. Blocked domain inside an open-url parameter, on any host
@@ -95,7 +98,7 @@ public class NAIFilterGameUrlPlugin extends BridgeWebViewClient {
       if (index >= 0) {
         String paramValue = urlString.substring(index + param.length());
         if (containsAny(paramValue, blockedDomains)) {
-          return redirect(view, urlString, lastInternalUrl());
+          return redirect(view, request, urlString, lastInternalUrl());
         }
       }
     }
@@ -103,14 +106,14 @@ public class NAIFilterGameUrlPlugin extends BridgeWebViewClient {
     // 3. Blocked host keywords, on any host
     for (String keyword : blockedHostKeywords) {
       if (host.contains(keyword)) {
-        return redirect(view, urlString, lastInternalUrl());
+        return redirect(view, request, urlString, lastInternalUrl());
       }
     }
 
     // 4. Blocked path suffixes, on any URL
     for (String suffix : blockedPathSuffixes) {
       if (urlString.endsWith("/" + suffix)) {
-        return redirect(view, urlString, lastInternalUrl());
+        return redirect(view, request, urlString, lastInternalUrl());
       }
     }
 
@@ -182,9 +185,29 @@ public class NAIFilterGameUrlPlugin extends BridgeWebViewClient {
     return first != null ? first : appUrl;
   }
 
-  private boolean redirect(WebView view, String from, String to) {
+  /**
+   * Blocks the navigation. If JS is listening for appUrlIntercepted, only notifies it
+   * and cancels, so the app stays alive and routes to `to` itself. Otherwise (no
+   * listener yet, or the page isn't the app, since Capacitor clears listeners on every
+   * page load) reloads the WebView at `to`.
+   */
+  private boolean redirect(WebView view, WebResourceRequest request, String from, String to) {
+    NAIFilterGameUrlEventsPlugin events = eventsPlugin();
+    if (events != null && events.notifyIntercepted(from, to, request.isForMainFrame())) {
+      Log.d(TAG, "Intercepted " + from + " -> " + to);
+      return true; // cancel the navigation, app stays alive
+    }
     Log.d(TAG, "Redirect from: " + from + " to: " + to);
     view.loadUrl(to);
     return true;
+  }
+
+  // Null when the events plugin isn't registered (the app hasn't run `npx cap sync`).
+  private NAIFilterGameUrlEventsPlugin eventsPlugin() {
+    PluginHandle handle = bridge.getPlugin("NAIFilterGameUrl");
+    if (handle == null || !(handle.getInstance() instanceof NAIFilterGameUrlEventsPlugin)) {
+      return null;
+    }
+    return (NAIFilterGameUrlEventsPlugin) handle.getInstance();
   }
 }

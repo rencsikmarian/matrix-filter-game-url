@@ -13,6 +13,7 @@ public class NAIFilterGameUrlPlugin: CAPPlugin, CAPBridgedPlugin {
     public let pluginMethods: [CAPPluginMethod] = []
 
     private static let allowedPrefixes = ["", "www.", "staging.", "beta."]
+    private static let interceptedEvent = "appUrlIntercepted"
 
     private var blockedDomains: [String] = []
     private var passPaths: [String] = []
@@ -62,25 +63,25 @@ public class NAIFilterGameUrlPlugin: CAPPlugin, CAPBridgedPlugin {
                 recordIfInternal(navigationAction, url)
                 return nil
             }
-            return redirect(from: urlString, to: lastInternalUrl)
+            return redirect(navigationAction, from: urlString, to: lastInternalUrl)
         }
 
         // 2. Blocked domain inside an open-url parameter, on any host
         for param in openUrlParams where urlString.contains(param) {
             let paramValue = urlString.components(separatedBy: param).dropFirst().joined(separator: param)
             if blockedDomains.contains(where: { paramValue.contains($0) }) {
-                return redirect(from: urlString, to: lastInternalUrl)
+                return redirect(navigationAction, from: urlString, to: lastInternalUrl)
             }
         }
 
         // 3. Blocked host keywords, on any host
         if blockedHostKeywords.contains(where: { host.contains($0) }) {
-            return redirect(from: urlString, to: lastInternalUrl)
+            return redirect(navigationAction, from: urlString, to: lastInternalUrl)
         }
 
         // 4. Blocked path suffixes, on any URL
         if blockedPathSuffixes.contains(where: { urlString.hasSuffix("/\($0)") }) {
-            return redirect(from: urlString, to: lastInternalUrl)
+            return redirect(navigationAction, from: urlString, to: lastInternalUrl)
         }
 
         recordIfInternal(navigationAction, url)
@@ -108,11 +109,25 @@ public class NAIFilterGameUrlPlugin: CAPPlugin, CAPBridgedPlugin {
         return (config.getArray(key) ?? []).compactMap { ($0 as? String)?.lowercased() }
     }
 
-    private func redirect(from urlString: String, to redirectUrl: String) -> NSNumber? {
-        guard let url = URL(string: redirectUrl) else {
+    /// Blocks the navigation. If JS is listening for `appUrlIntercepted`, only notifies
+    /// it and cancels, so the app stays alive and routes to `redirectAppUrl` itself.
+    /// Otherwise (no listener yet, or the main frame is not the app page, since Capacitor
+    /// clears listeners on every main-frame navigation) reloads the WebView at `redirectAppUrl`.
+    private func redirect(_ navigationAction: WKNavigationAction, from urlString: String, to redirectAppUrl: String) -> NSNumber? {
+        if hasListeners(Self.interceptedEvent) {
+            print("NAIFilterGameUrlPlugin: intercepted \(urlString) -> \(redirectAppUrl)")
+            let isMain = navigationAction.targetFrame?.isMainFrame ?? true
+            notifyListeners(Self.interceptedEvent, data: [
+                "url": urlString,
+                "appUrl": redirectAppUrl,
+                "isMainFrame": isMain
+            ])
+            return NSNumber(value: true) // cancel the navigation, app stays alive
+        }
+        guard let url = URL(string: redirectAppUrl) else {
             return nil // malformed target; let capacitor policy decide
         }
-        print("NAIFilterGameUrlPlugin: Redirect from: \(urlString) to: \(redirectUrl)")
+        print("NAIFilterGameUrlPlugin: Redirect from: \(urlString) to: \(redirectAppUrl)")
         webView?.load(URLRequest(url: url))
         return NSNumber(value: true)
     }
