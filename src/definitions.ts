@@ -57,9 +57,9 @@ declare module '@capacitor/cli' {
 
       /**
        * How many of the most recent internal (app-host) pages to remember as
-       * return targets. When a URL is blocked, the WebView reloads the newest
-       * remembered page. Set to 0 to disable tracking (always returns to the
-       * app URL).
+       * return targets, including in-app route changes. When a URL is
+       * blocked, the WebView returns to the newest remembered page. Set to 0
+       * to disable tracking (always returns to the app URL).
        *
        * @default 3
        * @example 3
@@ -72,7 +72,7 @@ declare module '@capacitor/cli' {
        * recorded, so a later block never sends the user back to it (e.g.
        * cashier or free-play pages).
        *
-       * @example ["/cash", "/free"]
+       * @example ["/cash", "/free", "/assets/"]
        */
       excludedReturnPaths?: string[];
     };

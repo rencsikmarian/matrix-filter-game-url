@@ -4,10 +4,16 @@ This plugin will handle the redirect urls when closing external games
 
 ## Install
 
+The plugin is installed from git, not npm:
+
 ```bash
-npm install matrix-filter-game-url
+npm install git+https://github.com/rencsikmarian/matrix-filter-game-url.git#main
 npx cap sync
 ```
+
+Your lock file pins the installed commit, so merging into `main` does not
+update your app; rerun the install to pick up changes. Use a tag or commit
+instead of `#main` to pin a specific version.
 
 ## Configuration
 
@@ -23,9 +29,10 @@ versions had built in (all previously hardcoded domains, chat pass paths and
 lobby checks), so copy it as-is to keep the old filtering after upgrading.
 
 When a URL is blocked, the WebView is sent back to the **most recent page the
-user visited on the app's own host** (the last internal link), falling back to
-the app URL if none was seen. Use `historyLimit` and `excludedReturnPaths` to
-tune which pages are remembered.
+user visited on the app's own host**, falling back to the app URL if none was
+seen. Every page is remembered, including in-app route changes (e.g. Angular
+router navigations). Use `historyLimit` and `excludedReturnPaths` to tune
+which pages are remembered.
 
 ```typescript
 import type { CapacitorConfig } from '@capacitor/cli';
@@ -63,7 +70,7 @@ const config: CapacitorConfig = {
       // App-host pages whose URL contains one of these are never remembered as
       // a return target (so a block won't send the user back to them).
       // Example values; there is no built-in default.
-      excludedReturnPaths: ['/cash', '/free'],
+      excludedReturnPaths: ['/cash', '/free', '/assets/'],
     },
   },
 };
@@ -180,85 +187,6 @@ public class MainActivity extends BridgeActivity {
 
 The optional second constructor argument (`new NAIFilterGameUrlPlugin(this.bridge, domains)`) overrides the `blockedDomains` config key; all other lists always come from the Capacitor config.
 
-## TODO
-- [ ] Add same function for iOS
-
-## Code to test for iOS
-
-```swift
-import Foundation
-import Capacitor
-import WebKit
-
-@objc(NAIFilterGameUrlPlugin)
-public class NAIFilterGameUrlPlugin: NSObject, CAPPlugin {
-    private let defaultBlockedDomains = [
-        // Add your blocked domains here
-    ]
-    private var blockedDomains: [String]
-    private var redirectAppUrl: String
-    private let appUrl: String
-
-    override public init() {
-        self.blockedDomains = defaultBlockedDomains
-        self.appUrl = "https://localhost:8100" // Default, update as needed
-        self.redirectAppUrl = self.appUrl
-        super.init()
-    }
-
-    @objc public func shouldOverrideLoad(_ navigationAction: WKNavigationAction) -> NSNumber? {
-        guard let url = navigationAction.request.url, let host = url.host else {
-            return NSNumber(value: false)
-        }
-
-        let urlString = url.absoluteString
-        print("Attempting to load URL: \(urlString)")
-
-        for blockedDomain in blockedDomains {
-            if host.contains(blockedDomain) {
-                print("Matched host: \(host)")
-                let scheme = url.scheme ?? ""
-                if scheme == "https" {
-                    self.redirectAppUrl = urlString
-                        .replacingOccurrences(of: "https://staging.\(blockedDomain)", with: self.appUrl)
-                        .replacingOccurrences(of: "https://beta.\(blockedDomain)", with: self.appUrl)
-                        .replacingOccurrences(of: "https://www.\(blockedDomain)", with: self.appUrl)
-                } else if scheme == "http" {
-                    self.redirectAppUrl = urlString
-                        .replacingOccurrences(of: "http://staging.\(blockedDomain)", with: self.appUrl)
-                        .replacingOccurrences(of: "http://beta.\(blockedDomain)", with: self.appUrl)
-                        .replacingOccurrences(of: "http://www.\(blockedDomain)", with: self.appUrl)
-                }
-                
-                print("Redirect from: \(urlString) to: \(self.redirectAppUrl)")
-                if let redirectURL = URL(string: self.redirectAppUrl) {
-                    DispatchQueue.main.async {
-                        self.bridge?.webView?.load(URLRequest(url: redirectURL))
-                    }
-                }
-                return NSNumber(value: true)
-            }
-        }
-
-        return NSNumber(value: false)
-    }
-}
-```
-  
 # How to use the plugin on iOS
-## Add this code in AppDelegate in application function
 
-```swift
-import Capacitor
-
-// ... existing imports and class declaration ...
-
-func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-    // Override point for customization after application launch.
-    
-    // Add this line to register your plugin
-    CAPBridge.registerPlugin(NAIFilterGameUrlPlugin.self)
-    
-    return true
-}
-```
+No code is needed: `npx cap sync` registers the plugin automatically.
