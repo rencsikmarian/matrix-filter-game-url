@@ -1,6 +1,6 @@
 {
   "name": "matrix-filter-game-url",
-  "version": "8.0.11",
+  "version": "8.1.0",
   "description": "This will handle the redirects when the user close the game",
   "main": "dist/plugin.cjs.js",
   "module": "dist/esm/index.js",
@@ -13,6 +13,7 @@
     "ios/Tests",
     "Package.swift",
     "MatrixFilterGameUrl.podspec",
+    "scripts/check-config.js",
     "dist/"
   ],
   "author": "Rencsik Marian",
@@ -30,7 +31,7 @@
     "native"
   ],
   "scripts": {
-    "verify": "npm run verify:android && npm run verify:web",
+    "verify": "npm run verify:android && npm run verify:ios && npm run verify:web",
     "verify:android": "cd android && ./gradlew clean build test && cd ..",
     "verify:ios": "xcodebuild -scheme MatrixFilterGameUrl -destination generic/platform=iOS",
     "verify:web": "npm run build",
@@ -42,7 +43,8 @@
     "build": "npm run clean && npm run docgen && tsc && rollup -c rollup.config.mjs",
     "clean": "rimraf ./dist",
     "watch": "tsc --watch",
-    "prepublishOnly": "npm run build"
+    "prepare": "npm run build",
+    "capacitor:copy:after": "node scripts/check-config.js"
   },
   "devDependencies": {
     "@capacitor/android": "^8.0.0",

@@ -12,120 +12,123 @@ public class NAIFilterGameUrlPlugin: CAPPlugin, CAPBridgedPlugin {
     public let jsName = "NAIFilterGameUrl"
     public let pluginMethods: [CAPPluginMethod] = []
 
-    private let defaultBlockedDomains = [
-        "admiralbet.es",
-        "admiralbet.de",
-        "stargames.de",
-        "starvegas.ch",
-        "admiral.ch",
-        "admiralcasino.co.uk",
-        "loteriesport.lu",
-        "admiral.ro",
-        "fenikss.lv",
-        "feniksscasino.lv",
-        "starvegas.es"
-    ]
-    
+    private static let allowedPrefixes = ["", "www.", "staging.", "beta."]
+    private static let interceptedEvent = "appUrlIntercepted"
+
     private var blockedDomains: [String] = []
-    private var redirectAppUrl: String = ""
+    private var passPaths: [String] = []
+    private var openUrlParams: [String] = []
+    private var blockedHostKeywords: [String] = []
+    private var blockedPathSuffixes: [String] = []
+    private var excludedReturnPaths: [String] = []
     private var appUrl: String = ""
 
+    // How many recent internal (app-host) pages to remember; 0 disables tracking.
+    private var historyLimit = 3
+    // Most-recent-first list of internal URLs the user actually visited.
+    private var internalUrlHistory: [String] = []
+    // Where a blocked navigation returns to: the newest internal page, else the app URL.
+    private var lastInternalUrl: String { internalUrlHistory.first ?? appUrl }
+
     @objc override public func load() {
-        print("NAIFilterGameUrlPlugin loaded successfully!")
-        
-        // Get the scheme and hostname from Capacitor config
         let scheme = bridge?.config.getString("server.scheme") ?? InstanceDescriptorDefaults.scheme
         let hostname = bridge?.config.getString("server.hostname") ?? InstanceDescriptorDefaults.hostname
+        appUrl = "\(scheme)://\(hostname)"
 
-        self.appUrl = "\(scheme)://\(hostname)"
-        self.redirectAppUrl = self.appUrl
-        self.blockedDomains = defaultBlockedDomains
+        let config = getConfig()
+        blockedDomains = configList(config, "blockedDomains")
+        passPaths = configList(config, "passPaths")
+        openUrlParams = configList(config, "openUrlParams")
+        blockedHostKeywords = configList(config, "blockedHostKeywords")
+        blockedPathSuffixes = configList(config, "blockedPathSuffixes")
+        excludedReturnPaths = configList(config, "excludedReturnPaths")
+        historyLimit = max(0, config.getInt("historyLimit", 3))
 
-         print("🔹 App URL set to: \(self.appUrl)")
+        print("NAIFilterGameUrlPlugin loaded. App URL: \(appUrl), blocked domains: \(blockedDomains)")
     }
-    
+
     @objc public override func shouldOverrideLoad(_ navigationAction: WKNavigationAction) -> NSNumber? {
-        print("✅ shouldOverrideLoad called with URL: \(navigationAction.request.url?.absoluteString ?? "Unknown")")
-        
-        guard let url = navigationAction.request.url else {
+        guard let url = navigationAction.request.url, let host = url.host?.lowercased() else {
             return nil // let capacitor policy decide
         }
         let urlString = url.absoluteString.lowercased()
-        guard let host = url.host else {
-            return nil // let capacitor policy decide
+
+        // 1. Blocked domain: redirect, unless a pass path exempts the URL
+        let isBlockedDomain = blockedDomains.contains { domain in
+            Self.allowedPrefixes.contains { prefix in host == prefix + domain }
+        }
+        if isBlockedDomain {
+            if passPaths.contains(where: { urlString.contains($0) }) {
+                print("NAIFilterGameUrlPlugin: Pass path allowed: \(urlString)")
+                recordIfInternal(navigationAction, url)
+                return nil
+            }
+            return redirect(navigationAction, from: urlString, to: lastInternalUrl)
         }
 
-        if urlString.contains("/ichatclient/") || urlString.contains("novomind") || urlString.contains("/chatRest"){
-            return nil
-        }
-        
-        var isBlocked = false
-        
-        for blockedDomain in blockedDomains {
-            if host.contains(blockedDomain) {
-                print("NAIFilterGameUrlPlugin: Matched host: \(host)")
-                let scheme = url.scheme ?? ""
-                
-                let allowedPrefixes = ["", "www.", "staging.", "beta."]
-                var shouldRedirect = false
-                
-                for prefix in allowedPrefixes {
-                    if host == "\(prefix)\(blockedDomain)" {
-                        shouldRedirect = true
-                        break
-                    }
-                }
-                
-                if !shouldRedirect {
-                    break
-                }
-                
-                if scheme == "https" {
-                    redirectAppUrl = urlString
-                        .replacingOccurrences(of: "https://\(blockedDomain)", with: appUrl)
-                        .replacingOccurrences(of: "https://staging.\(blockedDomain)", with: appUrl)
-                        .replacingOccurrences(of: "https://beta.\(blockedDomain)", with: appUrl)
-                        .replacingOccurrences(of: "https://www.\(blockedDomain)", with: appUrl)
-                } else if scheme == "http" {
-                    redirectAppUrl = urlString
-                        .replacingOccurrences(of: "http://\(blockedDomain)", with: appUrl)
-                        .replacingOccurrences(of: "http://staging.\(blockedDomain)", with: appUrl)
-                        .replacingOccurrences(of: "http://beta.\(blockedDomain)", with: appUrl)
-                        .replacingOccurrences(of: "http://www.\(blockedDomain)", with: appUrl)
-                }
-                isBlocked = true
-                break
-            }
-            
-            let openUrlParam = "openurl?url="
-            if urlString.contains(openUrlParam),
-               let paramValue = urlString.components(separatedBy: openUrlParam).last,
-               paramValue.contains(blockedDomain) {
-                print("NAIFilterGameUrlPlugin: Matched blocked domain in OpenURL parameter: \(paramValue)")
-                redirectAppUrl = appUrl
-                isBlocked = true
-                break
-            }
-            if host.contains("lobbyiframelaunch") {
-                print("NAIFilterGameUrlPlugin: Matched blocked domain 'lobbyiframelaunch'")
-                redirectAppUrl = appUrl
-                isBlocked = true
-                break
-            }
-            if urlString.hasSuffix("/lobbyiframelaunch") {
-                print("NAIFilterGameUrlPlugin: Matched blocked domain '/lobbyiframelaunch'")
-                redirectAppUrl = appUrl
-                isBlocked = true
-                break
+        // 2. Blocked domain inside an open-url parameter, on any host
+        for param in openUrlParams where urlString.contains(param) {
+            let paramValue = urlString.components(separatedBy: param).dropFirst().joined(separator: param)
+            if blockedDomains.contains(where: { paramValue.contains($0) }) {
+                return redirect(navigationAction, from: urlString, to: lastInternalUrl)
             }
         }
-        
-        if isBlocked {
-            print("NAIFilterGameUrlPlugin: Redirect from: \(urlString) to: \(redirectAppUrl)")
-            self.webView?.load(URLRequest(url: URL(string:redirectAppUrl)!))
-            return NSNumber(value: true)
+
+        // 3. Blocked host keywords, on any host
+        if blockedHostKeywords.contains(where: { host.contains($0) }) {
+            return redirect(navigationAction, from: urlString, to: lastInternalUrl)
         }
-        
+
+        // 4. Blocked path suffixes, on any URL
+        if blockedPathSuffixes.contains(where: { urlString.hasSuffix("/\($0)") }) {
+            return redirect(navigationAction, from: urlString, to: lastInternalUrl)
+        }
+
+        recordIfInternal(navigationAction, url)
         return nil // let capacitor policy decide
+    }
+
+    /// Remembers main-frame navigations that stay on the app's own host, so a later
+    /// blocked navigation can send the user back to the last page they were really on.
+    /// Pages matching `excludedReturnPaths` (e.g. cashier/free-play) are skipped.
+    private func recordIfInternal(_ navigationAction: WKNavigationAction, _ url: URL) {
+        guard historyLimit > 0, navigationAction.targetFrame?.isMainFrame == true else { return }
+        let original = url.absoluteString // keep original casing for the reload
+        let lower = original.lowercased()
+        guard lower.hasPrefix(appUrl.lowercased()) else { return }
+        guard !excludedReturnPaths.contains(where: { lower.contains($0) }) else { return }
+        guard internalUrlHistory.first != original else { return } // dedup consecutive
+        internalUrlHistory.insert(original, at: 0)
+        if internalUrlHistory.count > historyLimit {
+            internalUrlHistory.removeLast()
+        }
+        print("NAIFilterGameUrlPlugin: Recorded internal URL. History: \(internalUrlHistory)")
+    }
+
+    private func configList(_ config: PluginConfig, _ key: String) -> [String] {
+        return (config.getArray(key) ?? []).compactMap { ($0 as? String)?.lowercased() }
+    }
+
+    /// Blocks the navigation. If JS is listening for `appUrlIntercepted`, only notifies
+    /// it and cancels, so the app stays alive and routes to `redirectAppUrl` itself.
+    /// Otherwise (no listener yet, or the main frame is not the app page, since Capacitor
+    /// clears listeners on every main-frame navigation) reloads the WebView at `redirectAppUrl`.
+    private func redirect(_ navigationAction: WKNavigationAction, from urlString: String, to redirectAppUrl: String) -> NSNumber? {
+        if hasListeners(Self.interceptedEvent) {
+            print("NAIFilterGameUrlPlugin: intercepted \(urlString) -> \(redirectAppUrl)")
+            let isMain = navigationAction.targetFrame?.isMainFrame ?? true
+            notifyListeners(Self.interceptedEvent, data: [
+                "url": urlString,
+                "appUrl": redirectAppUrl,
+                "isMainFrame": isMain
+            ])
+            return NSNumber(value: true) // cancel the navigation, app stays alive
+        }
+        guard let url = URL(string: redirectAppUrl) else {
+            return nil // malformed target; let capacitor policy decide
+        }
+        print("NAIFilterGameUrlPlugin: Redirect from: \(urlString) to: \(redirectAppUrl)")
+        webView?.load(URLRequest(url: url))
+        return NSNumber(value: true)
     }
 }
