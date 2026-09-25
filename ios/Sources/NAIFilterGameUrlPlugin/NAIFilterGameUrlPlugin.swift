@@ -29,6 +29,7 @@ public class NAIFilterGameUrlPlugin: CAPPlugin, CAPBridgedPlugin {
     private var internalUrlHistory: [String] = []
     // Where a blocked navigation returns to: the newest internal page, else the app URL.
     private var lastInternalUrl: String { internalUrlHistory.first ?? appUrl }
+    private var urlObservation: NSKeyValueObservation?
 
     @objc override public func load() {
         let scheme = bridge?.config.getString("server.scheme") ?? InstanceDescriptorDefaults.scheme
@@ -43,6 +44,14 @@ public class NAIFilterGameUrlPlugin: CAPPlugin, CAPBridgedPlugin {
         blockedPathSuffixes = configList(config, "blockedPathSuffixes")
         excludedReturnPaths = configList(config, "excludedReturnPaths")
         historyLimit = max(0, config.getInt("historyLimit", 3))
+
+        // SPA route changes (history.pushState) never reach shouldOverrideLoad, so record
+        // the main-frame URL whenever it changes instead; this also covers full page loads.
+        urlObservation = webView?.observe(\.url, options: [.new]) { [weak self] webView, _ in
+            if let url = webView.url {
+                self?.recordIfInternal(url)
+            }
+        }
 
         print("NAIFilterGameUrlPlugin loaded. App URL: \(appUrl), blocked domains: \(blockedDomains)")
     }
@@ -60,7 +69,6 @@ public class NAIFilterGameUrlPlugin: CAPPlugin, CAPBridgedPlugin {
         if isBlockedDomain {
             if passPaths.contains(where: { urlString.contains($0) }) {
                 print("NAIFilterGameUrlPlugin: Pass path allowed: \(urlString)")
-                recordIfInternal(navigationAction, url)
                 return nil
             }
             return redirect(navigationAction, from: urlString, to: lastInternalUrl)
@@ -84,15 +92,14 @@ public class NAIFilterGameUrlPlugin: CAPPlugin, CAPBridgedPlugin {
             return redirect(navigationAction, from: urlString, to: lastInternalUrl)
         }
 
-        recordIfInternal(navigationAction, url)
         return nil // let capacitor policy decide
     }
 
-    /// Remembers main-frame navigations that stay on the app's own host, so a later
+    /// Remembers main-frame URLs that stay on the app's own host, so a later
     /// blocked navigation can send the user back to the last page they were really on.
     /// Pages matching `excludedReturnPaths` (e.g. cashier/free-play) are skipped.
-    private func recordIfInternal(_ navigationAction: WKNavigationAction, _ url: URL) {
-        guard historyLimit > 0, navigationAction.targetFrame?.isMainFrame == true else { return }
+    private func recordIfInternal(_ url: URL) {
+        guard historyLimit > 0 else { return }
         let original = url.absoluteString // keep original casing for the reload
         let lower = original.lowercased()
         guard lower.hasPrefix(appUrl.lowercased()) else { return }
