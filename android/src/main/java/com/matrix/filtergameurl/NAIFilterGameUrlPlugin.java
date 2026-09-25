@@ -86,7 +86,6 @@ public class NAIFilterGameUrlPlugin extends BridgeWebViewClient {
     if (matchesBlockedDomain(host)) {
       if (containsAny(urlString, passPaths)) {
         Log.d(TAG, "Pass path allowed: " + urlString);
-        recordIfInternal(request, url.toString());
         return false;
       }
       return redirect(view, request, urlString, lastInternalUrl());
@@ -117,8 +116,17 @@ public class NAIFilterGameUrlPlugin extends BridgeWebViewClient {
       }
     }
 
-    recordIfInternal(request, url.toString());
     return super.shouldOverrideUrlLoading(view, request);
+  }
+
+  // SPA route changes (history.pushState) never reach shouldOverrideUrlLoading, and neither
+  // does the initial app load, so record the main-frame URL whenever it changes instead.
+  @Override
+  public void doUpdateVisitedHistory(WebView view, String url, boolean isReload) {
+    super.doUpdateVisitedHistory(view, url, isReload);
+    if (url != null) {
+      recordIfInternal(url);
+    }
   }
 
   private boolean matchesBlockedDomain(String host) {
@@ -159,8 +167,8 @@ public class NAIFilterGameUrlPlugin extends BridgeWebViewClient {
     return result;
   }
 
-  private void recordIfInternal(WebResourceRequest request, String originalUrl) {
-    if (historyLimit <= 0 || !request.isForMainFrame()) {
+  private void recordIfInternal(String originalUrl) {
+    if (historyLimit <= 0) {
       return;
     }
     String lower = originalUrl.toLowerCase(Locale.ROOT);
