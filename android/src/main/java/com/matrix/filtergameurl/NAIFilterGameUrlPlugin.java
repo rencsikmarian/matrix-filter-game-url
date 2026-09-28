@@ -23,9 +23,11 @@ public class NAIFilterGameUrlPlugin extends BridgeWebViewClient {
   private static final String CONFIG_KEY = "NAIFilterGameUrl";
   private static final String DEFAULT_SCHEME = "https";
   private static final String DEFAULT_HOSTNAME = "localhost:8100";
-  private static final String[] ALLOWED_PREFIXES = {"", "www.", "staging.", "beta."};
+  private static final List<String> DEFAULT_ALLOWED_PREFIXES = Arrays.asList("www.", "staging.", "beta.");
 
   private final List<String> blockedDomains;
+  // Subdomain prefixes that also count as a blocked domain; the bare domain always matches.
+  private final List<String> allowedPrefixes;
   private final List<String> passPaths;
   private final List<String> openUrlParams;
   private final List<String> blockedHostKeywords;
@@ -55,6 +57,9 @@ public class NAIFilterGameUrlPlugin extends BridgeWebViewClient {
     } else {
       this.blockedDomains = configList(config, "blockedDomains");
     }
+    this.allowedPrefixes = config.getArray("allowedPrefixes") == null
+      ? DEFAULT_ALLOWED_PREFIXES
+      : configList(config, "allowedPrefixes");
     this.passPaths = configList(config, "passPaths");
     this.openUrlParams = configList(config, "openUrlParams");
     this.blockedHostKeywords = configList(config, "blockedHostKeywords");
@@ -131,7 +136,10 @@ public class NAIFilterGameUrlPlugin extends BridgeWebViewClient {
 
   private boolean matchesBlockedDomain(String host) {
     for (String domain : blockedDomains) {
-      for (String prefix : ALLOWED_PREFIXES) {
+      if (host.equals(domain)) {
+        return true;
+      }
+      for (String prefix : allowedPrefixes) {
         if (host.equals(prefix + domain)) {
           return true;
         }

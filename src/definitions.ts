@@ -17,12 +17,23 @@ declare module '@capacitor/cli' {
     NAIFilterGameUrl?: {
       /**
        * Domains whose pages return to the last visited app page (or the app
-       * URL). The host must equal the domain or its "www.", "staging." or
-       * "beta." variant.
+       * URL). The host must equal the domain or one of its `allowedPrefixes`
+       * variants.
        *
        * @example ["admiralbet.es", "stargames.de"]
        */
       blockedDomains?: string[];
+
+      /**
+       * Subdomain prefixes that also count as a blocked domain: the host
+       * must equal a prefix followed by the domain, so include the trailing
+       * dot. The bare domain always matches, so `[]` blocks only the exact
+       * domains.
+       *
+       * @default ["www.", "staging.", "beta."]
+       * @example ["www.", "staging.", "beta."]
+       */
+      allowedPrefixes?: string[];
 
       /**
        * Substrings that exempt a URL on a blocked domain from redirecting.

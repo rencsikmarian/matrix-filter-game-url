@@ -12,10 +12,12 @@ public class NAIFilterGameUrlPlugin: CAPPlugin, CAPBridgedPlugin {
     public let jsName = "NAIFilterGameUrl"
     public let pluginMethods: [CAPPluginMethod] = []
 
-    private static let allowedPrefixes = ["", "www.", "staging.", "beta."]
+    private static let defaultAllowedPrefixes = ["www.", "staging.", "beta."]
     private static let interceptedEvent = "appUrlIntercepted"
 
     private var blockedDomains: [String] = []
+    // Subdomain prefixes that also count as a blocked domain; the bare domain always matches.
+    private var allowedPrefixes: [String] = []
     private var passPaths: [String] = []
     private var openUrlParams: [String] = []
     private var blockedHostKeywords: [String] = []
@@ -38,6 +40,9 @@ public class NAIFilterGameUrlPlugin: CAPPlugin, CAPBridgedPlugin {
 
         let config = getConfig()
         blockedDomains = configList(config, "blockedDomains")
+        allowedPrefixes = config.getArray("allowedPrefixes") == nil
+            ? Self.defaultAllowedPrefixes
+            : configList(config, "allowedPrefixes")
         passPaths = configList(config, "passPaths")
         openUrlParams = configList(config, "openUrlParams")
         blockedHostKeywords = configList(config, "blockedHostKeywords")
@@ -64,7 +69,7 @@ public class NAIFilterGameUrlPlugin: CAPPlugin, CAPBridgedPlugin {
 
         // 1. Blocked domain: redirect, unless a pass path exempts the URL
         let isBlockedDomain = blockedDomains.contains { domain in
-            Self.allowedPrefixes.contains { prefix in host == prefix + domain }
+            host == domain || allowedPrefixes.contains { prefix in host == prefix + domain }
         }
         if isBlockedDomain {
             if passPaths.contains(where: { urlString.contains($0) }) {
