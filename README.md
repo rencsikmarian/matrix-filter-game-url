@@ -40,8 +40,8 @@ import type { CapacitorConfig } from '@capacitor/cli';
 const config: CapacitorConfig = {
   plugins: {
     NAIFilterGameUrl: {
-      // Pages on these domains (incl. www./staging./beta. variants) send the
-      // WebView back to the last visited app page.
+      // Pages on these domains (incl. their allowedPrefixes variants) send
+      // the WebView back to the last visited app page.
       blockedDomains: [
         'admiralbet.es',
         'admiralbet.de',
@@ -55,6 +55,10 @@ const config: CapacitorConfig = {
         'feniksscasino.lv',
         'starvegas.es',
       ],
+      // Subdomain variants of each blocked domain that are blocked too
+      // (keep the trailing dot). The bare domain always matches, so []
+      // blocks only the exact domains. Defaults to the list below.
+      allowedPrefixes: ['www.', 'staging.', 'beta.'],
       // URLs on a blocked domain containing one of these load normally.
       passPaths: ['/ichatclient/', 'novomind', '/chatrest'],
       // Checked on every URL: if the text after the marker contains a
