@@ -13,12 +13,15 @@ declare module '@capacitor/cli' {
      * When a URL is blocked, the WebView is sent back to the most recent
      * page the user visited on the app's own host (see `historyLimit` and
      * `excludedReturnPaths`), falling back to the app URL if none was seen.
+     * With `gamePaths` set, a link to a blocked domain tapped outside a game
+     * opens the same path inside the app instead.
      */
     NAIFilterGameUrl?: {
       /**
        * Domains whose pages return to the last visited app page (or the app
        * URL). The host must equal the domain or one of its `allowedPrefixes`
-       * variants.
+       * variants. See `gamePaths` for how links to these domains are treated
+       * outside a game.
        *
        * @example ["admiralbet.es", "stargames.de"]
        */
@@ -81,11 +84,33 @@ declare module '@capacitor/cli' {
        * Substrings that exclude an internal page from being remembered as a
        * return target. A visited app-host URL containing any of these is not
        * recorded, so a later block never sends the user back to it (e.g.
-       * cashier or free-play pages).
+       * 404 pages). Pages matching `gamePaths` are excluded automatically.
        *
-       * @example ["/cash", "/free", "/assets/"]
+       * @example ["/404", "/assets/"]
        */
       excludedReturnPaths?: string[];
+
+      /**
+       * Substrings that mark an app-host page as a game page. The user counts
+       * as "in a game" while the last app-host page shown in the main frame
+       * contains one of these; any other app-host page ends the game. A game
+       * that navigates the whole WebView to another host stays "in a game".
+       *
+       * In a game, a blocked-domain URL returns to the last visited app page.
+       * Outside a game, a top-level blocked-domain URL opens the same path
+       * (query and fragment kept) in the app instead, e.g.
+       * "https://www.admiralbet.de/de/slots?x=1" becomes
+       * "capacitor://localhost/de/slots?x=1". Blocked-domain URLs in iframes
+       * and the `openUrlParams`, `blockedHostKeywords` and
+       * `blockedPathSuffixes` checks always return to the last app page.
+       *
+       * Game pages are never remembered as return targets. When omitted or
+       * empty, every page counts as a game, so blocked-domain URLs always
+       * return to the last app page.
+       *
+       * @example ["/cash", "/free"]
+       */
+      gamePaths?: string[];
     };
   }
 }
@@ -100,8 +125,10 @@ export interface AppUrlIntercepted {
   url: string;
 
   /**
-   * Where the user should go instead: the last visited app page, or the app
-   * URL if none was recorded. Absolute, e.g. "capacitor://localhost/de/slots".
+   * Where the user should go instead: the last visited app page (or the app
+   * URL if none was recorded), or, for a blocked-domain link tapped outside
+   * a game (see `gamePaths`), the link's own path, query and fragment on the
+   * app URL. Absolute, e.g. "capacitor://localhost/de/slots".
    */
   appUrl: string;
 

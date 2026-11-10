@@ -34,6 +34,10 @@ seen. Every page is remembered, including in-app route changes (e.g. Angular
 router navigations). Use `historyLimit` and `excludedReturnPaths` to tune
 which pages are remembered.
 
+With `gamePaths` set, that only happens while the user is in a game. Outside a
+game, a link to a blocked domain opens the same path inside the app instead;
+see [Links outside a game](#links-outside-a-game).
+
 ```typescript
 import type { CapacitorConfig } from '@capacitor/cli';
 
@@ -74,13 +78,42 @@ const config: CapacitorConfig = {
       // App-host pages whose URL contains one of these are never remembered as
       // a return target (so a block won't send the user back to them).
       // Example values; there is no built-in default.
-      excludedReturnPaths: ['/cash', '/free', '/assets/'],
+      excludedReturnPaths: ['/404', '/assets/'],
+      // App-host pages whose URL contains one of these are game pages. While
+      // the user is on one, blocked domains return to the last app page; on
+      // any other app page, a link to a blocked domain opens the same path in
+      // the app. Game pages are never return targets. Omit to treat every
+      // page as a game (blocked domains always return to the last app page).
+      gamePaths: ['/cash', '/free'],
     },
   },
 };
 
 export default config;
 ```
+
+## Links outside a game
+
+Web content often links to the site with a full URL
+(`https://www.admiralbet.de/de/promotions?utm=x`). Those hosts are in
+`blockedDomains`, because a game navigating to them means the game was closed.
+`gamePaths` lets the plugin tell the two cases apart:
+
+| Where the user is | Blocked-domain URL goes to |
+| --- | --- |
+| On a game page (URL contains a `gamePaths` entry) | The last visited app page |
+| On any other app page | The same path in the app, query and fragment kept: `<app URL>/de/promotions?utm=x` |
+
+The user is "in a game" from the moment the main frame shows an app page
+matching `gamePaths` until it shows an app page that does not, so the app must
+change its route when a game ends (a close button or a game event that routes
+back to the lobby is enough). A game that navigates the whole WebView to its
+own host stays "in a game".
+
+Only top-level navigations are opened in the app. A blocked-domain URL loaded
+in an iframe, and the `openUrlParams`, `blockedHostKeywords` and
+`blockedPathSuffixes` checks, always return to the last visited app page.
+`passPaths` URLs always load normally.
 
 ## Handling blocked URLs in the app
 
@@ -89,6 +122,9 @@ the web app. To avoid the reload, attach an `appUrlIntercepted` listener:
 while one is attached, the plugin only cancels the navigation and emits the
 event, and your router navigates to `appUrl` itself. If no listener is
 attached (or the WebView's page is not your app), it falls back to the reload.
+The same event covers links opened in the app outside a game: `appUrl` is then
+the link's own path on the app URL, so keep `search` (and `hash`, if you use
+it) when routing.
 
 ```typescript
 import { Capacitor } from '@capacitor/core';
@@ -165,11 +201,11 @@ Removes all listeners for this plugin.
 
 Payload of the `appUrlIntercepted` event.
 
-| Prop              | Type                 | Description                                                                                                                                        |
-| ----------------- | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **`url`**         | <code>string</code>  | The blocked URL that was cancelled (lowercased).                                                                                                   |
-| **`appUrl`**      | <code>string</code>  | Where the user should go instead: the last visited app page, or the app URL if none was recorded. Absolute, e.g. "capacitor://localhost/de/slots". |
-| **`isMainFrame`** | <code>boolean</code> | Whether the blocked navigation targeted the main frame (false for iframes, e.g. an embedded game).                                                 |
+| Prop              | Type                 | Description                                                                                                                                                                                                                                                                        |
+| ----------------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`url`**         | <code>string</code>  | The blocked URL that was cancelled (lowercased).                                                                                                                                                                                                                                   |
+| **`appUrl`**      | <code>string</code>  | Where the user should go instead: the last visited app page (or the app URL if none was recorded), or, for a blocked-domain link tapped outside a game (see `gamePaths`), the link's own path, query and fragment on the app URL. Absolute, e.g. "capacitor://localhost/de/slots". |
+| **`isMainFrame`** | <code>boolean</code> | Whether the blocked navigation targeted the main frame (false for iframes, e.g. an embedded game).                                                                                                                                                                                 |
 
 </docgen-api>
 

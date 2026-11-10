@@ -15,106 +15,51 @@ public class NAIFilterGameUrlPlugin: CAPPlugin, CAPBridgedPlugin {
     private static let defaultAllowedPrefixes = ["www.", "staging.", "beta."]
     private static let interceptedEvent = "appUrlIntercepted"
 
-    private var blockedDomains: [String] = []
-    // Subdomain prefixes that also count as a blocked domain; the bare domain always matches.
-    private var allowedPrefixes: [String] = []
-    private var passPaths: [String] = []
-    private var openUrlParams: [String] = []
-    private var blockedHostKeywords: [String] = []
-    private var blockedPathSuffixes: [String] = []
-    private var excludedReturnPaths: [String] = []
-    private var appUrl: String = ""
-
-    // How many recent internal (app-host) pages to remember; 0 disables tracking.
-    private var historyLimit = 3
-    // Most-recent-first list of internal URLs the user actually visited.
-    private var internalUrlHistory: [String] = []
-    // Where a blocked navigation returns to: the newest internal page, else the app URL.
-    private var lastInternalUrl: String { internalUrlHistory.first ?? appUrl }
+    // Holds the rules and the navigation state (visited pages, in a game or not).
+    private var filter = UrlFilter(appUrl: "", config: UrlFilterConfig())
     private var urlObservation: NSKeyValueObservation?
 
     @objc override public func load() {
         let scheme = bridge?.config.getString("server.scheme") ?? InstanceDescriptorDefaults.scheme
         let hostname = bridge?.config.getString("server.hostname") ?? InstanceDescriptorDefaults.hostname
-        appUrl = "\(scheme)://\(hostname)"
+        let appUrl = "\(scheme)://\(hostname)"
 
         let config = getConfig()
-        blockedDomains = configList(config, "blockedDomains")
-        allowedPrefixes = config.getArray("allowedPrefixes") == nil
+        var rules = UrlFilterConfig()
+        rules.blockedDomains = configList(config, "blockedDomains")
+        rules.allowedPrefixes = config.getArray("allowedPrefixes") == nil
             ? Self.defaultAllowedPrefixes
             : configList(config, "allowedPrefixes")
-        passPaths = configList(config, "passPaths")
-        openUrlParams = configList(config, "openUrlParams")
-        blockedHostKeywords = configList(config, "blockedHostKeywords")
-        blockedPathSuffixes = configList(config, "blockedPathSuffixes")
-        excludedReturnPaths = configList(config, "excludedReturnPaths")
-        historyLimit = max(0, config.getInt("historyLimit", 3))
+        rules.passPaths = configList(config, "passPaths")
+        rules.openUrlParams = configList(config, "openUrlParams")
+        rules.blockedHostKeywords = configList(config, "blockedHostKeywords")
+        rules.blockedPathSuffixes = configList(config, "blockedPathSuffixes")
+        rules.excludedReturnPaths = configList(config, "excludedReturnPaths")
+        rules.gamePaths = configList(config, "gamePaths")
+        rules.historyLimit = max(0, config.getInt("historyLimit", 3))
+        filter = UrlFilter(appUrl: appUrl, config: rules)
 
         // SPA route changes (history.pushState) never reach shouldOverrideLoad, so record
         // the main-frame URL whenever it changes instead; this also covers full page loads.
         urlObservation = webView?.observe(\.url, options: [.new]) { [weak self] webView, _ in
-            if let url = webView.url {
-                self?.recordIfInternal(url)
-            }
+            guard let self = self, let url = webView.url else { return }
+            self.filter.mainFrameUrlChanged(url)
+            print("NAIFilterGameUrlPlugin: Main frame URL: \(url), in game: \(self.filter.inGame), history: \(self.filter.history)")
         }
 
-        print("NAIFilterGameUrlPlugin loaded. App URL: \(appUrl), blocked domains: \(blockedDomains)")
+        print("NAIFilterGameUrlPlugin loaded. App URL: \(appUrl), blocked domains: \(rules.blockedDomains)")
     }
 
     @objc public override func shouldOverrideLoad(_ navigationAction: WKNavigationAction) -> NSNumber? {
-        guard let url = navigationAction.request.url, let host = url.host?.lowercased() else {
+        guard let url = navigationAction.request.url else {
             return nil // let capacitor policy decide
         }
-        let urlString = url.absoluteString.lowercased()
-
-        // 1. Blocked domain: redirect, unless a pass path exempts the URL
-        let isBlockedDomain = blockedDomains.contains { domain in
-            host == domain || allowedPrefixes.contains { prefix in host == prefix + domain }
+        // A navigation without a target frame (e.g. target="_blank") counts as top-level.
+        let isMainFrame = navigationAction.targetFrame?.isMainFrame ?? true
+        guard let target = filter.redirectTarget(for: url, isMainFrame: isMainFrame) else {
+            return nil // let capacitor policy decide
         }
-        if isBlockedDomain {
-            if passPaths.contains(where: { urlString.contains($0) }) {
-                print("NAIFilterGameUrlPlugin: Pass path allowed: \(urlString)")
-                return nil
-            }
-            return redirect(navigationAction, from: urlString, to: lastInternalUrl)
-        }
-
-        // 2. Blocked domain inside an open-url parameter, on any host
-        for param in openUrlParams where urlString.contains(param) {
-            let paramValue = urlString.components(separatedBy: param).dropFirst().joined(separator: param)
-            if blockedDomains.contains(where: { paramValue.contains($0) }) {
-                return redirect(navigationAction, from: urlString, to: lastInternalUrl)
-            }
-        }
-
-        // 3. Blocked host keywords, on any host
-        if blockedHostKeywords.contains(where: { host.contains($0) }) {
-            return redirect(navigationAction, from: urlString, to: lastInternalUrl)
-        }
-
-        // 4. Blocked path suffixes, on any URL
-        if blockedPathSuffixes.contains(where: { urlString.hasSuffix("/\($0)") }) {
-            return redirect(navigationAction, from: urlString, to: lastInternalUrl)
-        }
-
-        return nil // let capacitor policy decide
-    }
-
-    /// Remembers main-frame URLs that stay on the app's own host, so a later
-    /// blocked navigation can send the user back to the last page they were really on.
-    /// Pages matching `excludedReturnPaths` (e.g. cashier/free-play) are skipped.
-    private func recordIfInternal(_ url: URL) {
-        guard historyLimit > 0 else { return }
-        let original = url.absoluteString // keep original casing for the reload
-        let lower = original.lowercased()
-        guard lower.hasPrefix(appUrl.lowercased()) else { return }
-        guard !excludedReturnPaths.contains(where: { lower.contains($0) }) else { return }
-        guard internalUrlHistory.first != original else { return } // dedup consecutive
-        internalUrlHistory.insert(original, at: 0)
-        if internalUrlHistory.count > historyLimit {
-            internalUrlHistory.removeLast()
-        }
-        print("NAIFilterGameUrlPlugin: Recorded internal URL. History: \(internalUrlHistory)")
+        return redirect(from: url.absoluteString.lowercased(), to: target, isMainFrame: isMainFrame)
     }
 
     private func configList(_ config: PluginConfig, _ key: String) -> [String] {
@@ -125,14 +70,13 @@ public class NAIFilterGameUrlPlugin: CAPPlugin, CAPBridgedPlugin {
     /// it and cancels, so the app stays alive and routes to `redirectAppUrl` itself.
     /// Otherwise (no listener yet, or the main frame is not the app page, since Capacitor
     /// clears listeners on every main-frame navigation) reloads the WebView at `redirectAppUrl`.
-    private func redirect(_ navigationAction: WKNavigationAction, from urlString: String, to redirectAppUrl: String) -> NSNumber? {
+    private func redirect(from urlString: String, to redirectAppUrl: String, isMainFrame: Bool) -> NSNumber? {
         if hasListeners(Self.interceptedEvent) {
             print("NAIFilterGameUrlPlugin: intercepted \(urlString) -> \(redirectAppUrl)")
-            let isMain = navigationAction.targetFrame?.isMainFrame ?? true
             notifyListeners(Self.interceptedEvent, data: [
                 "url": urlString,
                 "appUrl": redirectAppUrl,
-                "isMainFrame": isMain
+                "isMainFrame": isMainFrame
             ])
             return NSNumber(value: true) // cancel the navigation, app stays alive
         }

@@ -1,9 +1,7 @@
 package com.matrix.filtergameurl;
 
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Deque;
 import java.util.List;
 import java.util.Locale;
 
@@ -25,17 +23,8 @@ public class NAIFilterGameUrlPlugin extends BridgeWebViewClient {
   private static final String DEFAULT_HOSTNAME = "localhost:8100";
   private static final List<String> DEFAULT_ALLOWED_PREFIXES = Arrays.asList("www.", "staging.", "beta.");
 
-  private final List<String> blockedDomains;
-  // Subdomain prefixes that also count as a blocked domain; the bare domain always matches.
-  private final List<String> allowedPrefixes;
-  private final List<String> passPaths;
-  private final List<String> openUrlParams;
-  private final List<String> blockedHostKeywords;
-  private final List<String> blockedPathSuffixes;
-  private final List<String> excludedReturnPaths;
-  private final int historyLimit;
-  private final Deque<String> internalUrlHistory = new ArrayDeque<>();
-  private final String appUrl;
+  // Holds the rules and the navigation state (visited pages, in a game or not).
+  private final UrlFilter filter;
   private final Bridge bridge;
 
   public NAIFilterGameUrlPlugin(Bridge bridge) {
@@ -52,20 +41,23 @@ public class NAIFilterGameUrlPlugin extends BridgeWebViewClient {
 
     PluginConfig config = bridge.getConfig().getPluginConfiguration(CONFIG_KEY);
 
+    UrlFilter.Config rules = new UrlFilter.Config();
     if (domains != null && !domains.isEmpty()) {
-      this.blockedDomains = lowercased(domains);
+      rules.blockedDomains = lowercased(domains);
     } else {
-      this.blockedDomains = configList(config, "blockedDomains");
+      rules.blockedDomains = configList(config, "blockedDomains");
     }
-    this.allowedPrefixes = config.getArray("allowedPrefixes") == null
+    // Subdomain prefixes that also count as a blocked domain; the bare domain always matches.
+    rules.allowedPrefixes = config.getArray("allowedPrefixes") == null
       ? DEFAULT_ALLOWED_PREFIXES
       : configList(config, "allowedPrefixes");
-    this.passPaths = configList(config, "passPaths");
-    this.openUrlParams = configList(config, "openUrlParams");
-    this.blockedHostKeywords = configList(config, "blockedHostKeywords");
-    this.blockedPathSuffixes = configList(config, "blockedPathSuffixes");
-    this.excludedReturnPaths = configList(config, "excludedReturnPaths");
-    this.historyLimit = Math.max(0, config.getInt("historyLimit", 3));
+    rules.passPaths = configList(config, "passPaths");
+    rules.openUrlParams = configList(config, "openUrlParams");
+    rules.blockedHostKeywords = configList(config, "blockedHostKeywords");
+    rules.blockedPathSuffixes = configList(config, "blockedPathSuffixes");
+    rules.excludedReturnPaths = configList(config, "excludedReturnPaths");
+    rules.gamePaths = configList(config, "gamePaths");
+    rules.historyLimit = Math.max(0, config.getInt("historyLimit", 3));
 
     String scheme = bridge.getScheme();
     String hostname = bridge.getHost();
@@ -75,53 +67,20 @@ public class NAIFilterGameUrlPlugin extends BridgeWebViewClient {
     if (hostname == null || hostname.isEmpty()) {
       hostname = DEFAULT_HOSTNAME;
     }
-    this.appUrl = scheme + "://" + hostname;
+    String appUrl = scheme + "://" + hostname;
+    this.filter = new UrlFilter(appUrl, rules);
 
-    Log.d(TAG, "Created. App URL: " + this.appUrl + ", blocked domains: " + this.blockedDomains);
+    Log.d(TAG, "Created. App URL: " + appUrl + ", blocked domains: " + rules.blockedDomains);
   }
 
   @Override
   public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
     Uri url = request.getUrl();
-    String urlString = url.toString().toLowerCase(Locale.ROOT);
-    String host = url.getHost();
-    host = host == null ? "" : host.toLowerCase(Locale.ROOT);
-
-    // 1. Blocked domain: redirect, unless a pass path exempts the URL
-    if (matchesBlockedDomain(host)) {
-      if (containsAny(urlString, passPaths)) {
-        Log.d(TAG, "Pass path allowed: " + urlString);
-        return false;
-      }
-      return redirect(view, request, urlString, lastInternalUrl());
+    String target = filter.redirectTarget(url.toString(), url.getHost(), request.isForMainFrame());
+    if (target == null) {
+      return super.shouldOverrideUrlLoading(view, request);
     }
-
-    // 2. Blocked domain inside an open-url parameter, on any host
-    for (String param : openUrlParams) {
-      int index = urlString.indexOf(param);
-      if (index >= 0) {
-        String paramValue = urlString.substring(index + param.length());
-        if (containsAny(paramValue, blockedDomains)) {
-          return redirect(view, request, urlString, lastInternalUrl());
-        }
-      }
-    }
-
-    // 3. Blocked host keywords, on any host
-    for (String keyword : blockedHostKeywords) {
-      if (host.contains(keyword)) {
-        return redirect(view, request, urlString, lastInternalUrl());
-      }
-    }
-
-    // 4. Blocked path suffixes, on any URL
-    for (String suffix : blockedPathSuffixes) {
-      if (urlString.endsWith("/" + suffix)) {
-        return redirect(view, request, urlString, lastInternalUrl());
-      }
-    }
-
-    return super.shouldOverrideUrlLoading(view, request);
+    return redirect(view, request, url.toString().toLowerCase(Locale.ROOT), target);
   }
 
   // SPA route changes (history.pushState) never reach shouldOverrideUrlLoading, and neither
@@ -130,31 +89,9 @@ public class NAIFilterGameUrlPlugin extends BridgeWebViewClient {
   public void doUpdateVisitedHistory(WebView view, String url, boolean isReload) {
     super.doUpdateVisitedHistory(view, url, isReload);
     if (url != null) {
-      recordIfInternal(url);
+      filter.onMainFrameUrl(url);
+      Log.d(TAG, "Main frame URL: " + url + ", in game: " + filter.inGame() + ", history: " + filter.history());
     }
-  }
-
-  private boolean matchesBlockedDomain(String host) {
-    for (String domain : blockedDomains) {
-      if (host.equals(domain)) {
-        return true;
-      }
-      for (String prefix : allowedPrefixes) {
-        if (host.equals(prefix + domain)) {
-          return true;
-        }
-      }
-    }
-    return false;
-  }
-
-  private static boolean containsAny(String value, List<String> needles) {
-    for (String needle : needles) {
-      if (value.contains(needle)) {
-        return true;
-      }
-    }
-    return false;
   }
 
   private static List<String> configList(PluginConfig config, String key) {
@@ -173,32 +110,6 @@ public class NAIFilterGameUrlPlugin extends BridgeWebViewClient {
       }
     }
     return result;
-  }
-
-  private void recordIfInternal(String originalUrl) {
-    if (historyLimit <= 0) {
-      return;
-    }
-    String lower = originalUrl.toLowerCase(Locale.ROOT);
-    if (!lower.startsWith(appUrl.toLowerCase(Locale.ROOT))) {
-      return;
-    }
-    if (containsAny(lower, excludedReturnPaths)) {
-      return;
-    }
-    if (originalUrl.equals(internalUrlHistory.peekFirst())) {
-      return; // dedup consecutive
-    }
-    internalUrlHistory.addFirst(originalUrl);
-    while (internalUrlHistory.size() > historyLimit) {
-      internalUrlHistory.removeLast();
-    }
-    Log.d(TAG, "Recorded internal URL. History: " + internalUrlHistory);
-  }
-
-  private String lastInternalUrl() {
-    String first = internalUrlHistory.peekFirst();
-    return first != null ? first : appUrl;
   }
 
   /**
