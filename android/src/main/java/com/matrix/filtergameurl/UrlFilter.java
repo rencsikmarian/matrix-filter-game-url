@@ -122,16 +122,33 @@ final class UrlFilter {
         return inGame;
     }
 
-    /** Everything after the host: path, query and fragment, in their original casing. */
-    private static String pathAndAfter(String url) {
-        int schemeEnd = url.indexOf("://");
-        for (int i = schemeEnd < 0 ? 0 : schemeEnd + 3; i < url.length(); i++) {
+    /** The URL up to its path, for logging. */
+    static String withoutQuery(String url) {
+        for (int i = 0; i < url.length(); i++) {
             char c = url.charAt(i);
-            if (c == '/' || c == '?' || c == '#') {
-                return url.substring(i);
+            if (c == '?' || c == '#') {
+                return url.substring(0, i);
             }
         }
-        return "";
+        return url;
+    }
+
+    /**
+     * Everything after the host: path, query and fragment, in their original casing.
+     * Leading slashes and backslashes collapse to one slash, so an app that navigates
+     * to the result can never read it as a protocol-relative URL ("//other.host/x").
+     */
+    private static String pathAndAfter(String url) {
+        int schemeEnd = url.indexOf("://");
+        int i = schemeEnd < 0 ? 0 : schemeEnd + 3;
+        while (i < url.length() && "/\\?#".indexOf(url.charAt(i)) < 0) {
+            i++;
+        }
+        int pathStart = i;
+        while (i < url.length() && (url.charAt(i) == '/' || url.charAt(i) == '\\')) {
+            i++;
+        }
+        return (i > pathStart ? "/" : "") + url.substring(i);
     }
 
     private String lastInternalUrl() {

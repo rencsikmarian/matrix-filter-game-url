@@ -90,7 +90,12 @@ public class NAIFilterGameUrlPlugin extends BridgeWebViewClient {
     super.doUpdateVisitedHistory(view, url, isReload);
     if (url != null) {
       filter.onMainFrameUrl(url);
-      Log.d(TAG, "Main frame URL: " + url + ", in game: " + filter.inGame() + ", history: " + filter.history());
+      // Query strings and fragments can carry session tokens, so keep them out of logcat.
+      List<String> history = new ArrayList<>();
+      for (String page : filter.history()) {
+        history.add(UrlFilter.withoutQuery(page));
+      }
+      Log.d(TAG, "Main frame URL: " + UrlFilter.withoutQuery(url) + ", in game: " + filter.inGame() + ", history: " + history);
     }
   }
 

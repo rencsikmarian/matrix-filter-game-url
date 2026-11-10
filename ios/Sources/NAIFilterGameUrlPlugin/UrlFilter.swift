@@ -100,10 +100,18 @@ final class UrlFilter {
         return nil
     }
 
+    /// The URL up to its path, for logging.
+    static func withoutQuery(_ url: String) -> String {
+        return String(url.prefix(while: { $0 != "?" && $0 != "#" }))
+    }
+
     /// Everything after the host: path, query and fragment, in their original casing.
+    /// Leading slashes and backslashes collapse to one slash, so an app that navigates
+    /// to the result can never read it as a protocol-relative URL ("//other.host/x").
     private static func pathAndAfter(_ url: String) -> String {
         let afterScheme = url.range(of: "://")?.upperBound ?? url.startIndex
-        guard let start = url[afterScheme...].firstIndex(where: { "/?#".contains($0) }) else { return "" }
-        return String(url[start...])
+        let afterHost = url[afterScheme...].drop(while: { !"/\\?#".contains($0) })
+        let rest = afterHost.drop(while: { $0 == "/" || $0 == "\\" })
+        return (rest.count < afterHost.count ? "/" : "") + rest
     }
 }

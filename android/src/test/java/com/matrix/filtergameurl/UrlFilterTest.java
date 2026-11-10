@@ -233,4 +233,26 @@ public class UrlFilterTest {
 
         assertEquals("https://localhost", target(filter, "https://www.admiralbet.de/de/home"));
     }
+
+    @Test
+    public void outsideGameLinkPathCannotBecomeProtocolRelative() {
+        UrlFilter filter = gameAwareFilter();
+
+        assertEquals("https://localhost/evil.example.com/x?a=1", target(filter, "https://www.admiralbet.de//evil.example.com/x?a=1"));
+        assertEquals(
+            "https://localhost/evil.example.com",
+            filter.redirectTarget("https://www.admiralbet.de/\\/evil.example.com", "www.admiralbet.de", true)
+        );
+        assertEquals(
+            "https://localhost/evil.example.com",
+            filter.redirectTarget("https://www.admiralbet.de\\evil.example.com", "www.admiralbet.de", true)
+        );
+    }
+
+    @Test
+    public void withoutQueryDropsQueryAndFragment() {
+        assertEquals("https://games.example.com/play", UrlFilter.withoutQuery("https://games.example.com/play?token=s3cret#t"));
+        assertEquals("https://localhost/de/slots", UrlFilter.withoutQuery("https://localhost/de/slots#token=s3cret?x"));
+        assertEquals("https://localhost/de/slots", UrlFilter.withoutQuery("https://localhost/de/slots"));
+    }
 }

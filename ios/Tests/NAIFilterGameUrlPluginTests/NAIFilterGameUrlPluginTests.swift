@@ -221,4 +221,26 @@ class UrlFilterTests: XCTestCase {
 
         XCTAssertEqual(target(filter, "https://www.admiralbet.de/de/home"), "capacitor://localhost")
     }
+
+    func testOutsideGameLinkPathCannotBecomeProtocolRelative() {
+        let filter = gameAwareFilter()
+
+        XCTAssertEqual(
+            target(filter, "https://www.admiralbet.de//evil.example.com/x?a=1"),
+            "capacitor://localhost/evil.example.com/x?a=1"
+        )
+        XCTAssertEqual(target(filter, "https://www.admiralbet.de///evil.example.com"), "capacitor://localhost/evil.example.com")
+    }
+
+    func testWithoutQueryDropsQueryAndFragment() {
+        XCTAssertEqual(
+            UrlFilter.withoutQuery("https://games.example.com/play?token=s3cret#t"),
+            "https://games.example.com/play"
+        )
+        XCTAssertEqual(
+            UrlFilter.withoutQuery("capacitor://localhost/de/slots#token=s3cret?x"),
+            "capacitor://localhost/de/slots"
+        )
+        XCTAssertEqual(UrlFilter.withoutQuery("capacitor://localhost/de/slots"), "capacitor://localhost/de/slots")
+    }
 }

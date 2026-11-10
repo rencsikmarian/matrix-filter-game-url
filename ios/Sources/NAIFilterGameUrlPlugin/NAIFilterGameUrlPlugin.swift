@@ -44,7 +44,10 @@ public class NAIFilterGameUrlPlugin: CAPPlugin, CAPBridgedPlugin {
         urlObservation = webView?.observe(\.url, options: [.new]) { [weak self] webView, _ in
             guard let self = self, let url = webView.url else { return }
             self.filter.mainFrameUrlChanged(url)
-            print("NAIFilterGameUrlPlugin: Main frame URL: \(url), in game: \(self.filter.inGame), history: \(self.filter.history)")
+            // Query strings and fragments can carry session tokens, so keep them out of the log.
+            let page = UrlFilter.withoutQuery(url.absoluteString)
+            let history = self.filter.history.map(UrlFilter.withoutQuery)
+            print("NAIFilterGameUrlPlugin: Main frame URL: \(page), in game: \(self.filter.inGame), history: \(history)")
         }
 
         print("NAIFilterGameUrlPlugin loaded. App URL: \(appUrl), blocked domains: \(rules.blockedDomains)")
