@@ -1,7 +1,9 @@
 package com.matrix.filtergameurl;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 
 import java.net.URI;
 import java.util.Arrays;
@@ -30,7 +32,16 @@ public class UrlFilterTest {
 
     /** A main-frame navigation, the common case. */
     private static String target(UrlFilter filter, String url) {
-        return filter.redirectTarget(url, URI.create(url).getHost(), true);
+        return target(filter, url, URI.create(url).getHost(), true);
+    }
+
+    /** Where the navigation is sent instead, or null when the URL is left to load. */
+    private static String target(UrlFilter filter, String url, String host, boolean isMainFrame) {
+        return filter.decide(url, host, isMainFrame).target;
+    }
+
+    private static UrlFilter.Decision.Action action(UrlFilter filter, String url) {
+        return filter.decide(url, URI.create(url).getHost(), true).action;
     }
 
     @Test
@@ -60,7 +71,7 @@ public class UrlFilterTest {
     public void blockedDomainMatchIgnoresCase() {
         UrlFilter filter = filter();
 
-        assertEquals("https://localhost", filter.redirectTarget("https://WWW.AdmiralBet.de/", "WWW.AdmiralBet.de", true));
+        assertEquals("https://localhost", target(filter, "https://WWW.AdmiralBet.de/", "WWW.AdmiralBet.de", true));
     }
 
     @Test
@@ -129,10 +140,21 @@ public class UrlFilterTest {
 
     // --- gamePaths: blocked-domain links open in the app unless a game is running ---
 
-    private static UrlFilter gameAwareFilter() {
+    // Fake clock in milliseconds, so tests decide when the grace window after a game ends.
+    private long now = 1_000_000;
+
+    private static UrlFilter.Config gameConfig() {
         UrlFilter.Config config = config();
         config.gamePaths = Arrays.asList("/cash", "/free");
-        return new UrlFilter(APP_URL, config);
+        return config;
+    }
+
+    private UrlFilter gameAwareFilter() {
+        return gameAwareFilter(gameConfig());
+    }
+
+    private UrlFilter gameAwareFilter(UrlFilter.Config config) {
+        return new UrlFilter(APP_URL, config, () -> now);
     }
 
     @Test
@@ -165,10 +187,7 @@ public class UrlFilterTest {
         UrlFilter filter = gameAwareFilter();
         filter.onMainFrameUrl("https://localhost/de/slots");
 
-        assertEquals(
-            "https://localhost/de/slots",
-            filter.redirectTarget("https://www.admiralbet.de/de/promotions", "www.admiralbet.de", false)
-        );
+        assertEquals("https://localhost/de/slots", target(filter, "https://www.admiralbet.de/de/promotions", "www.admiralbet.de", false));
     }
 
     @Test
@@ -205,12 +224,100 @@ public class UrlFilterTest {
     }
 
     @Test
-    public void leavingTheGamePageSwitchesBackToOpeningLinksInApp() {
+    public void leavingTheGamePageSwitchesBackToOpeningLinksInAppAfterTheGraceWindow() {
         UrlFilter filter = gameAwareFilter();
+        filter.onMainFrameUrl("https://localhost/de/games/book-of-ra/cash");
+        filter.onMainFrameUrl("https://localhost/de/lobby");
+        now += 3000;
+
+        assertEquals("https://localhost/de/promotions", target(filter, "https://www.admiralbet.de/de/promotions"));
+    }
+
+    // A game often redirects to the site just after the app has already routed off the game page.
+    @Test
+    public void gameExitArrivingJustAfterTheGamePageIsLeftReturnsToLastAppPage() {
+        UrlFilter filter = gameAwareFilter();
+        filter.onMainFrameUrl("https://localhost/de/slots");
+        filter.onMainFrameUrl("https://localhost/de/games/book-of-ra/cash");
+        filter.onMainFrameUrl("https://localhost/de/slots");
+        now += 2999;
+
+        assertEquals("https://localhost/de/slots", target(filter, "https://www.admiralbet.de/de/home"));
+    }
+
+    @Test
+    public void graceWindowOfZeroEndsTheGameAtOnce() {
+        UrlFilter.Config config = gameConfig();
+        config.gameExitGraceMs = 0;
+        UrlFilter filter = gameAwareFilter(config);
         filter.onMainFrameUrl("https://localhost/de/games/book-of-ra/cash");
         filter.onMainFrameUrl("https://localhost/de/lobby");
 
         assertEquals("https://localhost/de/promotions", target(filter, "https://www.admiralbet.de/de/promotions"));
+    }
+
+    // --- appDomains: only the app's own site opens in the app ---
+
+    @Test
+    public void onlyAppDomainLinksOpenInTheApp() {
+        UrlFilter.Config config = gameConfig();
+        config.appDomains = Arrays.asList("admiralbet.de");
+        UrlFilter filter = gameAwareFilter(config);
+        filter.onMainFrameUrl("https://localhost/de/slots");
+
+        assertEquals("https://localhost/de/promotions", target(filter, "https://www.admiralbet.de/de/promotions"));
+        assertEquals("https://localhost/de/slots", target(filter, "https://www.stargames.de/slots/book-of-ra"));
+    }
+
+    @Test
+    public void appDomainsMatchTheSamePrefixesAsBlockedDomains() {
+        UrlFilter.Config config = gameConfig();
+        config.appDomains = Arrays.asList("admiralbet.de");
+        UrlFilter filter = gameAwareFilter(config);
+        filter.onMainFrameUrl("https://localhost/de/slots");
+
+        assertEquals("https://localhost/de/x", target(filter, "https://admiralbet.de/de/x"));
+        assertEquals("https://localhost/de/x", target(filter, "https://www.admiralbet.de/de/x"));
+        assertEquals("https://localhost/de/x", target(filter, "https://staging.admiralbet.de/de/x"));
+    }
+
+    @Test
+    public void withoutAppDomainsEveryBlockedDomainOpensInTheApp() {
+        UrlFilter filter = gameAwareFilter();
+        filter.onMainFrameUrl("https://localhost/de/slots");
+
+        assertEquals("https://localhost/slots/book-of-ra", target(filter, "https://www.stargames.de/slots/book-of-ra"));
+    }
+
+    // --- a pass path is told apart from a URL no rule matched ---
+
+    @Test
+    public void passPathIsReportedApartFromANonMatch() {
+        UrlFilter filter = filter();
+
+        assertEquals(UrlFilter.Decision.Action.PASS, action(filter, "https://www.admiralbet.de/iChatClient/index.html"));
+        assertEquals(UrlFilter.Decision.Action.NONE, action(filter, "https://games.example.com/play?id=1"));
+        assertEquals(UrlFilter.Decision.Action.REDIRECT, action(filter, "https://www.admiralbet.de/de/home"));
+    }
+
+    // --- Android iframe documents are recognised by the browser's navigation Accept header ---
+
+    @Test
+    public void browserNavigationAcceptHeaderIsADocumentRequest() {
+        assertTrue(
+            UrlFilter.isDocumentRequest("text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8")
+        );
+        assertTrue(UrlFilter.isDocumentRequest("Text/HTML,Application/XHTML+XML,*/*;q=0.8"));
+    }
+
+    @Test
+    public void subresourceAcceptHeadersAreNotDocumentRequests() {
+        assertFalse(UrlFilter.isDocumentRequest("*/*"));
+        assertFalse(UrlFilter.isDocumentRequest("image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"));
+        assertFalse(UrlFilter.isDocumentRequest("application/json, text/plain, */*"));
+        // An XHR that merely asks for HTML (e.g. jQuery's dataType "html") is not a navigation.
+        assertFalse(UrlFilter.isDocumentRequest("text/html, */*; q=0.01"));
+        assertFalse(UrlFilter.isDocumentRequest(null));
     }
 
     @Test
@@ -241,12 +348,132 @@ public class UrlFilterTest {
         assertEquals("https://localhost/evil.example.com/x?a=1", target(filter, "https://www.admiralbet.de//evil.example.com/x?a=1"));
         assertEquals(
             "https://localhost/evil.example.com",
-            filter.redirectTarget("https://www.admiralbet.de/\\/evil.example.com", "www.admiralbet.de", true)
+            target(filter, "https://www.admiralbet.de/\\/evil.example.com", "www.admiralbet.de", true)
         );
         assertEquals(
             "https://localhost/evil.example.com",
-            filter.redirectTarget("https://www.admiralbet.de\\evil.example.com", "www.admiralbet.de", true)
+            target(filter, "https://www.admiralbet.de\\evil.example.com", "www.admiralbet.de", true)
         );
+    }
+
+    // --- app pages are recognised by origin, not by string prefix ---
+
+    @Test
+    public void lookalikeHostIsNeverAReturnTarget() {
+        UrlFilter filter = filter();
+        filter.onMainFrameUrl("https://localhost/de/slots");
+        filter.onMainFrameUrl("https://localhost.evil.example/phish");
+        filter.onMainFrameUrl("https://localhost:8443/other");
+
+        assertEquals("https://localhost/de/slots", target(filter, "https://www.admiralbet.de/"));
+    }
+
+    // --- gamePaths match whole path segments ---
+
+    @Test
+    public void gamePathDoesNotMatchInsideALongerSegment() {
+        UrlFilter filter = gameAwareFilter();
+
+        filter.onMainFrameUrl("https://localhost/de/cashier");
+        assertEquals("https://localhost/de/terms", target(filter, "https://www.admiralbet.de/de/terms"));
+
+        filter.onMainFrameUrl("https://localhost/de/promotions/free-spins");
+        assertEquals("https://localhost/de/terms", target(filter, "https://www.admiralbet.de/de/terms"));
+    }
+
+    @Test
+    public void gamePathIgnoresQueryAndFragment() {
+        UrlFilter filter = gameAwareFilter();
+
+        filter.onMainFrameUrl("https://localhost/de/login?returnUrl=/de/games/book-of-ra/cash");
+        assertEquals("https://localhost/de/terms", target(filter, "https://www.admiralbet.de/de/terms"));
+
+        filter.onMainFrameUrl("https://localhost/de/lobby#/free");
+        assertEquals("https://localhost/de/terms", target(filter, "https://www.admiralbet.de/de/terms"));
+    }
+
+    @Test
+    public void gamePathMatchesAheadOfFurtherSegments() {
+        UrlFilter filter = gameAwareFilter();
+        filter.onMainFrameUrl("https://localhost/de/slots");
+
+        filter.onMainFrameUrl("https://localhost/de/games/book-of-ra/cash/demo");
+        assertEquals("https://localhost/de/slots", target(filter, "https://www.admiralbet.de/de/home"));
+
+        filter.onMainFrameUrl("https://localhost/de/games/book-of-ra/free/");
+        assertEquals("https://localhost/de/slots", target(filter, "https://www.admiralbet.de/de/home"));
+    }
+
+    @Test
+    public void pageThatOnlyResemblesAGamePathIsAReturnTarget() {
+        UrlFilter filter = gameAwareFilter();
+        filter.onMainFrameUrl("https://localhost/de/slots");
+        filter.onMainFrameUrl("https://localhost/de/cashier");
+        filter.onMainFrameUrl("https://localhost/de/games/book-of-ra/cash");
+
+        assertEquals("https://localhost/de/cashier", target(filter, "https://www.admiralbet.de/de/home"));
+    }
+
+    // --- empty config entries are ignored ---
+
+    @Test
+    public void emptyBlockedHostKeywordBlocksNothing() {
+        UrlFilter.Config config = config();
+        config.blockedHostKeywords = Arrays.asList("");
+
+        assertNull(target(new UrlFilter(APP_URL, config), "https://games.example.com/play"));
+    }
+
+    @Test
+    public void emptyBlockedPathSuffixBlocksNothing() {
+        UrlFilter.Config config = config();
+        config.blockedPathSuffixes = Arrays.asList("");
+
+        assertNull(target(new UrlFilter(APP_URL, config), "https://games.example.com/"));
+    }
+
+    @Test
+    public void emptyPassPathExemptsNothing() {
+        UrlFilter.Config config = config();
+        config.passPaths = Arrays.asList("");
+
+        assertEquals("https://localhost", target(new UrlFilter(APP_URL, config), "https://www.admiralbet.de/de/home"));
+    }
+
+    @Test
+    public void emptyGamePathCountsAsNoGamePaths() {
+        UrlFilter.Config config = config();
+        config.gamePaths = Arrays.asList("");
+        UrlFilter filter = new UrlFilter(APP_URL, config);
+        filter.onMainFrameUrl("https://localhost/de/slots");
+
+        // Without game paths every page counts as a game: return to the last app page.
+        assertEquals("https://localhost/de/slots", target(filter, "https://www.admiralbet.de/de/home"));
+    }
+
+    // --- launcher rules win over opening a link in the app ---
+
+    @Test
+    public void outsideGameLauncherUrlOnBlockedDomainReturnsToLastAppPage() {
+        UrlFilter filter = gameAwareFilter();
+        filter.onMainFrameUrl("https://localhost/de/slots");
+
+        assertEquals("https://localhost/de/slots", target(filter, "https://www.admiralbet.de/de/lobbyiframelaunch"));
+        assertEquals("https://localhost/de/slots", target(filter, "https://www.admiralbet.de/openurl?url=https://www.stargames.de/"));
+    }
+
+    // Reloading the return page goes through the filter again on iOS; it must not bounce forever.
+    @Test
+    public void navigationToItsOwnReturnTargetLoadsNormally() {
+        UrlFilter filter = filter();
+        filter.onMainFrameUrl("https://localhost/de/lobbyiframelaunch");
+
+        assertNull(target(filter, "https://localhost/de/lobbyiframelaunch"));
+    }
+
+    @Test
+    public void urlWithoutHostLoadsNormally() {
+        assertNull(target(filter(), "about:blank#x/lobbyiframelaunch", null, true));
     }
 
     @Test

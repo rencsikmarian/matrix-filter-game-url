@@ -22,11 +22,14 @@ All filtering rules live in your `capacitor.config.ts` (or
 check, and **without a `NAIFilterGameUrl` entry the plugin lets every URL
 through** (the previously hardcoded domain list was removed in this version).
 In that case `npx cap sync` prints a warning. Values are matched
-case-insensitively.
+case-insensitively, and empty strings in a list are ignored.
 
-The config below is the default setup: it reproduces the rules earlier
-versions had built in (all previously hardcoded domains, chat pass paths and
-lobby checks), so copy it as-is to keep the old filtering after upgrading.
+The config below is the recommended setup. The keys from `blockedDomains` to
+`blockedPathSuffixes` reproduce the rules earlier versions had built in (all
+previously hardcoded domains, chat pass paths and lobby checks). `appDomains`,
+`gamePaths` and `gameExitGraceMs` are newer and change what a link to a
+blocked domain does outside a game, so leave those three out to keep the old
+filtering exactly after upgrading.
 
 When a URL is blocked, the WebView is sent back to the **most recent page the
 user visited on the app's own host**, falling back to the app URL if none was
@@ -35,8 +38,8 @@ router navigations). Use `historyLimit` and `excludedReturnPaths` to tune
 which pages are remembered.
 
 With `gamePaths` set, that only happens while the user is in a game. Outside a
-game, a link to a blocked domain opens the same path inside the app instead;
-see [Links outside a game](#links-outside-a-game).
+game, a link to the app's own site (`appDomains`) opens the same path inside
+the app instead; see [Links outside a game](#links-outside-a-game).
 
 ```typescript
 import type { CapacitorConfig } from '@capacitor/cli';
@@ -64,6 +67,7 @@ const config: CapacitorConfig = {
       // blocks only the exact domains. Defaults to the list below.
       allowedPrefixes: ['www.', 'staging.', 'beta.'],
       // URLs on a blocked domain containing one of these load normally.
+      // Also list links that are not app pages here, e.g. '.pdf'.
       passPaths: ['/ichatclient/', 'novomind', '/chatrest'],
       // Checked on every URL: if the text after the marker contains a
       // blocked domain, return to the last visited app page.
@@ -79,12 +83,22 @@ const config: CapacitorConfig = {
       // a return target (so a block won't send the user back to them).
       // Example values; there is no built-in default.
       excludedReturnPaths: ['/404', '/assets/'],
-      // App-host pages whose URL contains one of these are game pages. While
-      // the user is on one, blocked domains return to the last app page; on
-      // any other app page, a link to a blocked domain opens the same path in
-      // the app. Game pages are never return targets. Omit to treat every
-      // page as a game (blocked domains always return to the last app page).
+      // The blocked domains that are this app's own site (their
+      // allowedPrefixes variants included). Outside a game only links to
+      // these open in the app. Omit to treat every blocked domain that way.
+      appDomains: ['admiralbet.de'],
+      // App-host pages whose path contains one of these as whole segments
+      // ('/cash' matches /de/games/x/cash, not /de/cashier) are game pages.
+      // While the user is on one, blocked domains return to the last app
+      // page; on any other app page, a link to an appDomains site opens the
+      // same path in the app. Game pages are never return targets. Omit to
+      // treat every page as a game (blocked domains always return to the
+      // last app page).
       gamePaths: ['/cash', '/free'],
+      // How long after leaving a game page the user still counts as in the
+      // game, so a late redirect from the game is not opened as a link.
+      // Defaults to 3000; 0 disables.
+      gameExitGraceMs: 3000,
     },
   },
 };
@@ -101,19 +115,33 @@ Web content often links to the site with a full URL
 
 | Where the user is | Blocked-domain URL goes to |
 | --- | --- |
-| On a game page (URL contains a `gamePaths` entry) | The last visited app page |
+| On a game page (path contains a `gamePaths` entry) | The last visited app page |
 | On any other app page | The same path in the app, query and fragment kept: `<app URL>/de/promotions?utm=x` |
 
-The user is "in a game" from the moment the main frame shows an app page
-matching `gamePaths` until it shows an app page that does not, so the app must
-change its route when a game ends (a close button or a game event that routes
-back to the lobby is enough). A game that navigates the whole WebView to its
-own host stays "in a game".
+A `gamePaths` entry matches whole path segments: the query and fragment are
+ignored, and the entry must end at a `/` or at the end of the path. `/cash`
+matches `/de/games/book-of-ra/cash` but not `/de/cashier`.
 
-Only top-level navigations are opened in the app. A blocked-domain URL loaded
-in an iframe, and the `openUrlParams`, `blockedHostKeywords` and
-`blockedPathSuffixes` checks, always return to the last visited app page.
-`passPaths` URLs always load normally.
+The user is "in a game" from the moment the main frame shows an app page
+matching `gamePaths` until it shows an app page that does not, plus
+`gameExitGraceMs` (3 seconds by default). The app must change its route when a
+game ends (a close button or a game event that routes back to the lobby is
+enough); the extra time covers a game that redirects to the site just after
+the app has already routed away. A game that navigates the whole WebView to
+its own host stays "in a game".
+
+Only links to the app's own site are opened in the app. List its domains in
+`appDomains`; a link to any other blocked domain returns to the last visited
+app page. Without `appDomains`, every blocked domain counts as the app's own
+site.
+
+Only top-level navigations are opened in the app. A frame that navigates
+itself to a blocked domain, and any URL matching `openUrlParams`,
+`blockedHostKeywords` or `blockedPathSuffixes`, always returns to the last
+visited app page. `passPaths` URLs always load normally.
+
+Every other top-level URL on an `appDomains` site is treated as an app route,
+so add links that are not app pages, such as files (`.pdf`), to `passPaths`.
 
 ## Handling blocked URLs in the app
 
@@ -205,7 +233,7 @@ Payload of the `appUrlIntercepted` event.
 | ----------------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **`url`**         | <code>string</code>  | The blocked URL that was cancelled (lowercased).                                                                                                                                                                                                                                   |
 | **`appUrl`**      | <code>string</code>  | Where the user should go instead: the last visited app page (or the app URL if none was recorded), or, for a blocked-domain link tapped outside a game (see `gamePaths`), the link's own path, query and fragment on the app URL. Absolute, e.g. "capacitor://localhost/de/slots". |
-| **`isMainFrame`** | <code>boolean</code> | Whether the blocked navigation targeted the main frame (false for iframes, e.g. an embedded game).                                                                                                                                                                                 |
+| **`isMainFrame`** | <code>boolean</code> | Whether the blocked navigation targeted the main frame (false for iframes, e.g. an embedded game). On Android a frame is recognised by the request it sends for its page, since the WebView does not report frame navigations.                                                     |
 
 </docgen-api>
 
@@ -226,6 +254,17 @@ public class MainActivity extends BridgeActivity {
 ```
 
 The optional second constructor argument (`new NAIFilterGameUrlPlugin(this.bridge, domains)`) overrides the `blockedDomains` config key; all other lists always come from the Capacitor config.
+
+## Frames on Android
+
+Android's WebView does not report a page loading inside a frame as a
+navigation. The plugin recognises it from the request the frame sends for its
+page (a GET with the browser's page `Accept` header), gives the frame an empty
+page and then handles the blocked URL like any other. Two differences from iOS
+follow: a frame that submits a form (POST) to a blocked URL is not caught, and
+if the frame sits on the very page it would return to and no
+`appUrlIntercepted` listener is attached, the page is left as it is instead of
+being reloaded.
 
 # How to use the plugin on iOS
 

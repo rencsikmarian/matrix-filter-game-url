@@ -20,9 +20,10 @@ public class NAIFilterGameUrlPlugin: CAPPlugin, CAPBridgedPlugin {
     private var urlObservation: NSKeyValueObservation?
 
     @objc override public func load() {
-        let scheme = bridge?.config.getString("server.scheme") ?? InstanceDescriptorDefaults.scheme
-        let hostname = bridge?.config.getString("server.hostname") ?? InstanceDescriptorDefaults.hostname
-        let appUrl = "\(scheme)://\(hostname)"
+        // The origin the app is really served from. It follows server.iosScheme,
+        // server.hostname and server.url (e.g. live reload).
+        let defaultAppUrl = "\(InstanceDescriptorDefaults.scheme)://\(InstanceDescriptorDefaults.hostname)"
+        let appUrl = (bridge?.config.serverURL).flatMap(UrlFilter.origin(of:)) ?? defaultAppUrl
 
         let config = getConfig()
         var rules = UrlFilterConfig()
@@ -30,6 +31,7 @@ public class NAIFilterGameUrlPlugin: CAPPlugin, CAPBridgedPlugin {
         rules.allowedPrefixes = config.getArray("allowedPrefixes") == nil
             ? Self.defaultAllowedPrefixes
             : configList(config, "allowedPrefixes")
+        rules.appDomains = configList(config, "appDomains")
         rules.passPaths = configList(config, "passPaths")
         rules.openUrlParams = configList(config, "openUrlParams")
         rules.blockedHostKeywords = configList(config, "blockedHostKeywords")
@@ -37,6 +39,7 @@ public class NAIFilterGameUrlPlugin: CAPPlugin, CAPBridgedPlugin {
         rules.excludedReturnPaths = configList(config, "excludedReturnPaths")
         rules.gamePaths = configList(config, "gamePaths")
         rules.historyLimit = max(0, config.getInt("historyLimit", 3))
+        rules.gameExitGraceMs = max(0, config.getInt("gameExitGraceMs", 3000))
         filter = UrlFilter(appUrl: appUrl, config: rules)
 
         // SPA route changes (history.pushState) never reach shouldOverrideLoad, so record
@@ -44,13 +47,14 @@ public class NAIFilterGameUrlPlugin: CAPPlugin, CAPBridgedPlugin {
         urlObservation = webView?.observe(\.url, options: [.new]) { [weak self] webView, _ in
             guard let self = self, let url = webView.url else { return }
             self.filter.mainFrameUrlChanged(url)
+            guard CAPLog.enableLogging else { return }
             // Query strings and fragments can carry session tokens, so keep them out of the log.
             let page = UrlFilter.withoutQuery(url.absoluteString)
             let history = self.filter.history.map(UrlFilter.withoutQuery)
-            print("NAIFilterGameUrlPlugin: Main frame URL: \(page), in game: \(self.filter.inGame), history: \(history)")
+            CAPLog.print("NAIFilterGameUrlPlugin: Main frame URL: \(page), in game: \(self.filter.inGame), history: \(history)")
         }
 
-        print("NAIFilterGameUrlPlugin loaded. App URL: \(appUrl), blocked domains: \(rules.blockedDomains)")
+        CAPLog.print("NAIFilterGameUrlPlugin loaded. App URL: \(appUrl), blocked domains: \(rules.blockedDomains)")
     }
 
     @objc public override func shouldOverrideLoad(_ navigationAction: WKNavigationAction) -> NSNumber? {
@@ -59,10 +63,10 @@ public class NAIFilterGameUrlPlugin: CAPPlugin, CAPBridgedPlugin {
         }
         // A navigation without a target frame (e.g. target="_blank") counts as top-level.
         let isMainFrame = navigationAction.targetFrame?.isMainFrame ?? true
-        guard let target = filter.redirectTarget(for: url, isMainFrame: isMainFrame) else {
-            return nil // let capacitor policy decide
+        guard case .redirect(let target) = filter.decide(for: url, isMainFrame: isMainFrame) else {
+            return nil // no rule matched, or a pass path: let capacitor policy decide
         }
-        return redirect(from: url.absoluteString.lowercased(), to: target, isMainFrame: isMainFrame)
+        return redirect(from: url.absoluteString, to: target, isMainFrame: isMainFrame)
     }
 
     private func configList(_ config: PluginConfig, _ key: String) -> [String] {
@@ -74,10 +78,12 @@ public class NAIFilterGameUrlPlugin: CAPPlugin, CAPBridgedPlugin {
     /// Otherwise (no listener yet, or the main frame is not the app page, since Capacitor
     /// clears listeners on every main-frame navigation) reloads the WebView at `redirectAppUrl`.
     private func redirect(from urlString: String, to redirectAppUrl: String, isMainFrame: Bool) -> NSNumber? {
+        // Query strings and fragments can carry session tokens, so keep them out of the log.
+        let route = "\(UrlFilter.withoutQuery(urlString)) -> \(UrlFilter.withoutQuery(redirectAppUrl))"
         if hasListeners(Self.interceptedEvent) {
-            print("NAIFilterGameUrlPlugin: intercepted \(urlString) -> \(redirectAppUrl)")
+            CAPLog.print("NAIFilterGameUrlPlugin: Intercepted \(route)")
             notifyListeners(Self.interceptedEvent, data: [
-                "url": urlString,
+                "url": urlString.lowercased(),
                 "appUrl": redirectAppUrl,
                 "isMainFrame": isMainFrame
             ])
@@ -86,7 +92,7 @@ public class NAIFilterGameUrlPlugin: CAPPlugin, CAPBridgedPlugin {
         guard let url = URL(string: redirectAppUrl) else {
             return nil // malformed target; let capacitor policy decide
         }
-        print("NAIFilterGameUrlPlugin: Redirect from: \(urlString) to: \(redirectAppUrl)")
+        CAPLog.print("NAIFilterGameUrlPlugin: Redirect \(route)")
         webView?.load(URLRequest(url: url))
         return NSNumber(value: true)
     }

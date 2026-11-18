@@ -3,6 +3,8 @@ import XCTest
 
 class UrlFilterTests: XCTestCase {
     private let appUrl = "capacitor://localhost"
+    // Fake clock in milliseconds, so tests decide when the grace window after a game ends.
+    private var now: Int64 = 1_000_000
 
     private func config() -> UrlFilterConfig {
         var config = UrlFilterConfig()
@@ -18,16 +20,23 @@ class UrlFilterTests: XCTestCase {
     }
 
     private func filter() -> UrlFilter {
-        return UrlFilter(appUrl: appUrl, config: config())
+        return filter(config())
+    }
+
+    private func filter(_ config: UrlFilterConfig) -> UrlFilter {
+        return UrlFilter(appUrl: appUrl, config: config, clock: { self.now })
     }
 
     private func visit(_ filter: UrlFilter, _ url: String) {
         filter.mainFrameUrlChanged(URL(string: url)!)
     }
 
-    /// A main-frame navigation, the common case.
+    /// Where the navigation is sent instead, or nil when the URL is left to load.
     private func target(_ filter: UrlFilter, _ url: String, isMainFrame: Bool = true) -> String? {
-        return filter.redirectTarget(for: URL(string: url)!, isMainFrame: isMainFrame)
+        if case .redirect(let target) = filter.decide(for: URL(string: url)!, isMainFrame: isMainFrame) {
+            return target
+        }
+        return nil
     }
 
     func testBlockedDomainReturnsToLastVisitedAppPage() {
@@ -111,7 +120,7 @@ class UrlFilterTests: XCTestCase {
     func testHistoryLimitZeroAlwaysReturnsToAppUrl() {
         var config = config()
         config.historyLimit = 0
-        let filter = UrlFilter(appUrl: appUrl, config: config)
+        let filter = filter(config)
         visit(filter, "capacitor://localhost/de/slots")
 
         XCTAssertEqual(target(filter, "https://www.admiralbet.de/"), "capacitor://localhost")
@@ -119,10 +128,14 @@ class UrlFilterTests: XCTestCase {
 
     // MARK: - gamePaths: blocked-domain links open in the app unless a game is running
 
-    private func gameAwareFilter() -> UrlFilter {
+    private func gameConfig() -> UrlFilterConfig {
         var config = config()
         config.gamePaths = ["/cash", "/free"]
-        return UrlFilter(appUrl: appUrl, config: config)
+        return config
+    }
+
+    private func gameAwareFilter() -> UrlFilter {
+        return filter(gameConfig())
     }
 
     func testOutsideGameBlockedDomainLinkOpensSamePathInApp() {
@@ -192,8 +205,33 @@ class UrlFilterTests: XCTestCase {
         XCTAssertEqual(target(filter, "https://www.admiralbet.de/de/home"), "capacitor://localhost/de/slots")
     }
 
-    func testLeavingTheGamePageSwitchesBackToOpeningLinksInApp() {
+    func testLeavingTheGamePageSwitchesBackToOpeningLinksInAppAfterTheGraceWindow() {
         let filter = gameAwareFilter()
+        visit(filter, "capacitor://localhost/de/games/book-of-ra/cash")
+        visit(filter, "capacitor://localhost/de/lobby")
+        now += 3000
+
+        XCTAssertEqual(
+            target(filter, "https://www.admiralbet.de/de/promotions"),
+            "capacitor://localhost/de/promotions"
+        )
+    }
+
+    // A game often redirects to the site just after the app has already routed off the game page.
+    func testGameExitArrivingJustAfterTheGamePageIsLeftReturnsToLastAppPage() {
+        let filter = gameAwareFilter()
+        visit(filter, "capacitor://localhost/de/slots")
+        visit(filter, "capacitor://localhost/de/games/book-of-ra/cash")
+        visit(filter, "capacitor://localhost/de/slots")
+        now += 2999
+
+        XCTAssertEqual(target(filter, "https://www.admiralbet.de/de/home"), "capacitor://localhost/de/slots")
+    }
+
+    func testGraceWindowOfZeroEndsTheGameAtOnce() {
+        var config = gameConfig()
+        config.gameExitGraceMs = 0
+        let filter = filter(config)
         visit(filter, "capacitor://localhost/de/games/book-of-ra/cash")
         visit(filter, "capacitor://localhost/de/lobby")
 
@@ -216,7 +254,7 @@ class UrlFilterTests: XCTestCase {
         var config = config()
         config.gamePaths = ["/cash"]
         config.historyLimit = 0
-        let filter = UrlFilter(appUrl: appUrl, config: config)
+        let filter = filter(config)
         visit(filter, "capacitor://localhost/de/games/book-of-ra/cash")
 
         XCTAssertEqual(target(filter, "https://www.admiralbet.de/de/home"), "capacitor://localhost")
@@ -232,6 +270,166 @@ class UrlFilterTests: XCTestCase {
         XCTAssertEqual(target(filter, "https://www.admiralbet.de///evil.example.com"), "capacitor://localhost/evil.example.com")
     }
 
+    // MARK: - gamePaths match whole path segments
+
+    func testGamePathDoesNotMatchInsideALongerSegment() {
+        let filter = gameAwareFilter()
+
+        visit(filter, "capacitor://localhost/de/cashier")
+        XCTAssertEqual(target(filter, "https://www.admiralbet.de/de/terms"), "capacitor://localhost/de/terms")
+
+        visit(filter, "capacitor://localhost/de/promotions/free-spins")
+        XCTAssertEqual(target(filter, "https://www.admiralbet.de/de/terms"), "capacitor://localhost/de/terms")
+    }
+
+    func testGamePathIgnoresQueryAndFragment() {
+        let filter = gameAwareFilter()
+
+        visit(filter, "capacitor://localhost/de/login?returnUrl=/de/games/book-of-ra/cash")
+        XCTAssertEqual(target(filter, "https://www.admiralbet.de/de/terms"), "capacitor://localhost/de/terms")
+
+        visit(filter, "capacitor://localhost/de/lobby#/free")
+        XCTAssertEqual(target(filter, "https://www.admiralbet.de/de/terms"), "capacitor://localhost/de/terms")
+    }
+
+    func testGamePathMatchesAheadOfFurtherSegments() {
+        let filter = gameAwareFilter()
+        visit(filter, "capacitor://localhost/de/slots")
+
+        visit(filter, "capacitor://localhost/de/games/book-of-ra/cash/demo")
+        XCTAssertEqual(target(filter, "https://www.admiralbet.de/de/home"), "capacitor://localhost/de/slots")
+
+        visit(filter, "capacitor://localhost/de/games/book-of-ra/free/")
+        XCTAssertEqual(target(filter, "https://www.admiralbet.de/de/home"), "capacitor://localhost/de/slots")
+    }
+
+    func testPageThatOnlyResemblesAGamePathIsAReturnTarget() {
+        let filter = gameAwareFilter()
+        visit(filter, "capacitor://localhost/de/slots")
+        visit(filter, "capacitor://localhost/de/cashier")
+        visit(filter, "capacitor://localhost/de/games/book-of-ra/cash")
+
+        XCTAssertEqual(target(filter, "https://www.admiralbet.de/de/home"), "capacitor://localhost/de/cashier")
+    }
+
+    // MARK: - appDomains: only the app's own site opens in the app
+
+    func testOnlyAppDomainLinksOpenInTheApp() {
+        var config = gameConfig()
+        config.appDomains = ["admiralbet.de"]
+        let filter = filter(config)
+        visit(filter, "capacitor://localhost/de/slots")
+
+        XCTAssertEqual(
+            target(filter, "https://www.admiralbet.de/de/promotions"),
+            "capacitor://localhost/de/promotions"
+        )
+        XCTAssertEqual(target(filter, "https://www.stargames.de/slots/book-of-ra"), "capacitor://localhost/de/slots")
+    }
+
+    func testAppDomainsMatchTheSamePrefixesAsBlockedDomains() {
+        var config = gameConfig()
+        config.appDomains = ["admiralbet.de"]
+        let filter = filter(config)
+        visit(filter, "capacitor://localhost/de/slots")
+
+        XCTAssertEqual(target(filter, "https://admiralbet.de/de/x"), "capacitor://localhost/de/x")
+        XCTAssertEqual(target(filter, "https://www.admiralbet.de/de/x"), "capacitor://localhost/de/x")
+        XCTAssertEqual(target(filter, "https://staging.admiralbet.de/de/x"), "capacitor://localhost/de/x")
+    }
+
+    func testWithoutAppDomainsEveryBlockedDomainOpensInTheApp() {
+        let filter = gameAwareFilter()
+        visit(filter, "capacitor://localhost/de/slots")
+
+        XCTAssertEqual(
+            target(filter, "https://www.stargames.de/slots/book-of-ra"),
+            "capacitor://localhost/slots/book-of-ra"
+        )
+    }
+
+    // MARK: - app pages are recognised by origin, not by string prefix
+
+    func testLookalikeHostIsNeverAReturnTarget() {
+        let filter = filter()
+        visit(filter, "capacitor://localhost/de/slots")
+        visit(filter, "capacitor://localhost.evil.example/phish")
+        visit(filter, "capacitor://localhost:8443/other")
+
+        XCTAssertEqual(target(filter, "https://www.admiralbet.de/"), "capacitor://localhost/de/slots")
+    }
+
+    // MARK: - empty config entries are ignored
+
+    func testEmptyBlockedHostKeywordBlocksNothing() {
+        var config = config()
+        config.blockedHostKeywords = [""]
+
+        XCTAssertNil(target(filter(config), "https://games.example.com/play"))
+    }
+
+    func testEmptyBlockedPathSuffixBlocksNothing() {
+        var config = config()
+        config.blockedPathSuffixes = [""]
+
+        XCTAssertNil(target(filter(config), "https://games.example.com/"))
+    }
+
+    func testEmptyPassPathExemptsNothing() {
+        var config = config()
+        config.passPaths = [""]
+
+        XCTAssertEqual(target(filter(config), "https://www.admiralbet.de/de/home"), "capacitor://localhost")
+    }
+
+    func testEmptyGamePathCountsAsNoGamePaths() {
+        var config = config()
+        config.gamePaths = [""]
+        let filter = filter(config)
+        visit(filter, "capacitor://localhost/de/slots")
+
+        // Without game paths every page counts as a game: return to the last app page.
+        XCTAssertEqual(target(filter, "https://www.admiralbet.de/de/home"), "capacitor://localhost/de/slots")
+    }
+
+    // MARK: - launcher rules win over opening a link in the app
+
+    func testOutsideGameLauncherUrlOnBlockedDomainReturnsToLastAppPage() {
+        let filter = gameAwareFilter()
+        visit(filter, "capacitor://localhost/de/slots")
+
+        XCTAssertEqual(target(filter, "https://www.admiralbet.de/de/lobbyiframelaunch"), "capacitor://localhost/de/slots")
+        XCTAssertEqual(
+            target(filter, "https://www.admiralbet.de/openurl?url=https://www.stargames.de/"),
+            "capacitor://localhost/de/slots"
+        )
+    }
+
+    // Reloading the return page goes through the filter again; it must not bounce forever.
+    func testNavigationToItsOwnReturnTargetLoadsNormally() {
+        let filter = filter()
+        visit(filter, "capacitor://localhost/de/lobbyiframelaunch")
+
+        XCTAssertNil(target(filter, "capacitor://localhost/de/lobbyiframelaunch"))
+    }
+
+    // MARK: - a pass path is told apart from a URL no rule matched
+
+    func testPassPathIsReportedApartFromANonMatch() {
+        let filter = filter()
+
+        XCTAssertEqual(
+            filter.decide(for: URL(string: "https://www.admiralbet.de/iChatClient/index.html")!, isMainFrame: true),
+            .pass
+        )
+        XCTAssertEqual(
+            filter.decide(for: URL(string: "https://games.example.com/play?id=1")!, isMainFrame: true),
+            .noMatch
+        )
+    }
+
+    // MARK: - helpers
+
     func testWithoutQueryDropsQueryAndFragment() {
         XCTAssertEqual(
             UrlFilter.withoutQuery("https://games.example.com/play?token=s3cret#t"),
@@ -242,5 +440,16 @@ class UrlFilterTests: XCTestCase {
             "capacitor://localhost/de/slots"
         )
         XCTAssertEqual(UrlFilter.withoutQuery("capacitor://localhost/de/slots"), "capacitor://localhost/de/slots")
+    }
+
+    // The app URL is the origin the WebView really serves the app from.
+    func testOriginKeepsSchemeHostAndPortOnly() {
+        XCTAssertEqual(UrlFilter.origin(of: URL(string: "capacitor://localhost")!), "capacitor://localhost")
+        XCTAssertEqual(UrlFilter.origin(of: URL(string: "ionic://localhost/")!), "ionic://localhost")
+        XCTAssertEqual(
+            UrlFilter.origin(of: URL(string: "http://192.168.0.5:8100/index.html?x=1")!),
+            "http://192.168.0.5:8100"
+        )
+        XCTAssertNil(UrlFilter.origin(of: URL(string: "about:blank")!))
     }
 }
